@@ -1,0 +1,97 @@
+_schema-version: "3.2"
+ID: javamigrationsample
+version: 0.0.1
+modules:
+- name: javamigrationsample-destination-content
+  type: com.sap.application.content
+  requires:
+  - name: javamigrationsample-destination-service
+    parameters:
+      content-target: true
+  - name: javamigrationsample-repo-host
+    parameters:
+      service-key:
+        name: javamigrationsample-repo-host-key
+  - name: javamigrationsample-uaa
+    parameters:
+      service-key:
+        name: javamigrationsample-uaa-key
+  parameters:
+    content:
+      instance:
+        destinations:
+        - Name: javamigrationsample_html_repo_host
+          ServiceInstanceName: javamigrationsample-html5-srv
+          ServiceKeyName: javamigrationsample-repo-host-key
+          sap.cloud.service: javamigrationsample
+        - Authentication: OAuth2UserTokenExchange
+          Name: javamigrationsample_uaa
+          ServiceInstanceName: cf-app1-xsuaa
+          ServiceKeyName: javamigrationsample-uaa-key
+          sap.cloud.service: javamigrationsample
+        existing_destinations_policy: ignore
+  build-parameters:
+    no-source: true
+- name: javamigrationsample-app-content
+  type: com.sap.application.content
+  path: .
+  requires:
+  - name: javamigrationsample-repo-host
+    parameters:
+      content-target: true
+  build-parameters:
+    build-result: resources
+    requires:
+      - name: javamigrationsample
+        artifacts:
+        - javamigrationsample.zip
+        target-path: resources/
+- name: javamigrationsample
+  type: html5
+  path: javamigrationsample
+  build-parameters:
+    build-result: dist
+    builder: custom
+    commands:
+    - npm install
+    - npm run build:cf
+    supported-platforms: []
+resources:
+- name: javamigrationsample-destination-service
+  type: org.cloudfoundry.managed-service
+  parameters:
+    config:
+      HTML5Runtime_enabled: true
+      init_data:
+        instance:
+          destinations:
+          - Authentication: NoAuthentication
+            Name: ui5
+            ProxyType: Internet
+            Type: HTTP
+            URL: https://ui5.sap.com
+          - Authentication: NoAuthentication
+            Name: javamagement
+            ProxyType: Internet
+            Type: HTTP
+            URL: https://${org}-${space}-cf-application1.${default-domain}
+            ForwardAuthToken: true
+          existing_destinations_policy: update
+      version: 1.0.0
+    service: destination
+    service-name: javamigrationsample-destination-service
+    service-plan: lite
+- name: javamigrationsample-uaa
+  type: org.cloudfoundry.existing-service
+  parameters:
+    service: xsuaa
+    service-name: cf-app1-xsuaa
+- name: javamigrationsample-repo-host
+  type: org.cloudfoundry.managed-service
+  parameters:
+    service: html5-apps-repo
+    service-name: javamigrationsample-html5-srv
+    service-plan: app-host
+parameters:
+  deploy_mode: html5-repo
+  enable-parallel-deployments: true

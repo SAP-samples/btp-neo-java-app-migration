@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<web-app xmlns="http://xmlns.jcp.org/xml/ns/javaee"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://xmlns.jcp.org/xml/ns/javaee http://xmlns.jcp.org/xml/ns/javaee/web-app_4_0.xsd"
+         version="4.0">
+
+    <servlet>
+        <servlet-name>HomeServlet</servlet-name>
+        <servlet-class>com.example.application2.HomeServlet</servlet-class>
+    </servlet>
+    <servlet-mapping>
+        <servlet-name>HomeServlet</servlet-name>
+        <url-pattern>/</url-pattern>
+    </servlet-mapping>
+
+    <servlet>
+        <servlet-name>DocumentsPageServlet</servlet-name>
+        <servlet-class>com.example.application2.DocumentsPageServlet</servlet-class>
+    </servlet>
+    <servlet-mapping>
+        <servlet-name>DocumentsPageServlet</servlet-name>
+        <url-pattern>/documents</url-pattern>
+    </servlet-mapping>
+
+    <servlet>
+        <servlet-name>OnPremiseServlet</servlet-name>
+        <servlet-class>com.example.application2.OnPremiseServlet</servlet-class>
+    </servlet>
+    <servlet-mapping>
+        <servlet-name>OnPremiseServlet</servlet-name>
+        <url-pattern>/onpremise</url-pattern>
+    </servlet-mapping>
+
+    <servlet>
+        <servlet-name>DocumentsServlet</servlet-name>
+        <servlet-class>com.example.application2.DocumentsServlet</servlet-class>
+    </servlet>
+    <servlet-mapping>
+        <servlet-name>DocumentsServlet</servlet-name>
+        <url-pattern>/api/documents</url-pattern>
+    </servlet-mapping>
+
+    <login-config>
+        <auth-method>FORM</auth-method>
+    </login-config>
+    <security-constraint>
+        <web-resource-collection>
+            <web-resource-name>Public Area</web-resource-name>
+            <url-pattern>/*</url-pattern>
+        </web-resource-collection>
+        <auth-constraint>
+            <!-- Role Everyone will not be assignable -->
+            <role-name>Everyone</role-name>
+        </auth-constraint>
+    </security-constraint>
+    <security-constraint>
+        <web-resource-collection>
+            <web-resource-name>Protected Area</web-resource-name>
+            <url-pattern>/hello-developer</url-pattern>
+        </web-resource-collection>
+        <auth-constraint>
+            <role-name>Developer</role-name>
+        </auth-constraint>
+    </security-constraint>
+    <security-role>
+        <description>All SAP BTP users</description>
+        <role-name>Everyone</role-name>
+    </security-role>
+    <security-role>
+        <role-name>Developer</role-name>
+    </security-role>
+    
+    <resource-ref>
+        <res-ref-name>EcmService</res-ref-name>
+        <res-type>com.sap.ecm.api.EcmService</res-type>
+    </resource-ref>
+
+    <resource-ref>
+        <res-ref-name>connectivityConfiguration</res-ref-name>
+        <res-type>com.sap.core.connectivity.api.configuration.ConnectivityConfiguration</res-type>
+    </resource-ref>
+
+    <resource-ref>
+        <res-ref-name>authenticationHeaderProvider</res-ref-name>
+        <res-type>com.sap.core.connectivity.api.authentication.AuthenticationHeaderProvider</res-type>
+    </resource-ref>
+</web-app>

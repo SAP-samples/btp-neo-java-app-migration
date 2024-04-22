@@ -1,0 +1,15 @@
+{
+  "destinations": [
+    {
+      "name": "javamagement",
+      "url": "https://evolveneomigration-dev-cf-application1.cfapps.eu10.hana.ondemand.com",
+      "forwardAuthToken": true
+    },
+    {
+      "name": "ui5",
+      "url": "https://ui5.sap.com",
+      "forwardAuthToken": true
+    }
+  ],
+  "PORT": 5001
+}

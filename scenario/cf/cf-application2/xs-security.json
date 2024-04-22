@@ -1,0 +1,26 @@
+{
+  "xsappname": "cf-application2",
+  "tenant-mode": "dedicated",
+  "scopes": [
+    {
+      "name": "$XSAPPNAME.Everyone",
+      "description": "Everyone"
+    }
+  ],
+  "role-templates": [
+    {
+      "name": "Everyone",
+      "scope-references": [
+        "$XSAPPNAME.Everyone"
+      ]
+    }
+  ],
+  "role-collections": [
+    {
+      "name": "Everyone_RC_app2",
+      "role-template-references": [
+        "$XSAPPNAME.Everyone"
+      ]
+    }
+  ]
+}

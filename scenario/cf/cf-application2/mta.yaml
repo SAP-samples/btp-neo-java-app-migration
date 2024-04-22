@@ -1,0 +1,65 @@
+_schema-version: "3.2"
+version: 0.0.1
+ID: cf-application2
+modules:
+  - name: cf-application2
+    type: java
+    path: ./
+    parameters:
+      disk-quota: 512MB
+      memory: 512MB
+    build-parameters:
+      buildpack: sap_java_buildpack
+      build-result: "target/application2-1.0-SNAPSHOT.war"
+    properties:
+      ENABLE_SECURITY_JAVA_API_V2: true
+      SET_LOGGING_LEVEL: 'ROOT: INFO'
+    requires:
+      - name: cf-app2-xsuaa
+      - name: cf-app2-sdm
+      - name: cf-app2-destination
+      - name: cf-app2-connectivity
+    provides:
+      - name: cf-app2-java-app
+        properties:
+          java_app_url: '${default-url}'
+
+  - name: cf-application2-approuter
+    type: approuter.nodejs
+    path: approuter
+    parameters:
+      disk-quota: 256M
+      memory: 256M
+    properties:
+      XS_APP_LOG_LEVEL: debug
+    requires:
+      - name: cf-app2-xsuaa
+      - name: cf-app2-java-app
+        group: destinations
+        properties:
+          name: cf-app2-destination
+          url: '~{java_app_url}'
+          forwardAuthToken: true
+
+resources:
+  - name: cf-app2-destination
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: destination
+      service-plan: lite
+  - name: cf-app2-connectivity
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: connectivity
+      service-plan: lite
+  - name: cf-app2-xsuaa
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: xsuaa
+      service-plan: application
+      path: ./xs-security.json
+  - name: cf-app2-sdm
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: sdm
+      service-plan: standard

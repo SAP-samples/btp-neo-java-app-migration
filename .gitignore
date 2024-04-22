@@ -1,0 +1,23 @@
+node_modules/
+target/
+dist/
+resources/
+
+# IDE
+.idea/
+target
+
+# Web IDE, App Studio
+.che/
+.gen/
+
+.DS_Store
+
+package-lock.json
+
+# MTA
+*_mta_build_tmp
+*.mtar
+mta_archives/
+
+default-services.json

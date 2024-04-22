@@ -1,0 +1,23 @@
+<core:FragmentDefinition xmlns="sap.m" xmlns:core="sap.ui.core" xmlns:f="sap.ui.layout.form" xmlns:u="sap.ui.unified">
+	<Dialog id="addEmployeeId" title="{i18n>add}">
+		<f:SimpleForm editable="true" layout="ResponsiveGridLayout" labelSpanXL="3" labelSpanL="3" labelSpanM="3" labelSpanS="12"
+			adjustLabelSpan="false" emptySpanXL="4" emptySpanL="4" emptySpanM="4" emptySpanS="0" columnsXL="1" columnsL="1" columnsM="1"
+			singleContainerFullSize="false">
+			<f:content>
+				<Label text="{i18n>firstNameCol}"/>
+				<Input value="{dialogModel>/firstName}"/>
+				<Label text="{i18n>lastNameCol}"/>
+				<Input value="{dialogModel>/lastName}"></Input>
+				<Avatar src= "{dialogModel>/avatarBase64}" displaySize="S" visible="{= !!${dialogModel>/avatarBase64}}"/>
+				<u:FileUploader id="fileUploader" buttonOnly="true" icon="sap-icon://customer" buttonText="{i18n>uploadAvatarBtn}" fileType="{viewModel>/fileTypes}" name="myFileUpload" uploadUrl="upload/" tooltip="Upload your avatart"
+					change="onFileChange"/>
+			</f:content>
+		</f:SimpleForm>
+		<beginButton>
+			<Button text="{i18n>dialogAddButtonText}" press=".onAddEmpoyeeDialog"/>
+		</beginButton>
+		<endButton>
+			<Button text="{i18n>dialogCloseButtonText}" press=".onCloseDialog"/>
+		</endButton>
+	</Dialog>
+</core:FragmentDefinition>
