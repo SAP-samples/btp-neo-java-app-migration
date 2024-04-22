@@ -758,61 +758,70 @@ As well, code changes for opencmis session retrieval are needed (full code [here
 
 public class EcmManager {
 
-  // CMIS Session parameter values
-  private static final String BROWSER = "browser";
-  private static final String TRUE = "true";
-  private static final String FALSE = "false";
-  private static final String LANGUAGE_EN = "en";
-  private static final String CONNECTION_TIMEOUT = Integer.toString(30_000);
-  private static final String READ_TIMEOUT = Integer.toString(600_000);
+   // CMIS Session parameter values
+   private static final String BROWSER = "browser";
+   private static final String TRUE = "true";
+   private static final String FALSE = "false";
+   private static final String LANGUAGE_EN = "en";
+   private static final String CONNECTION_TIMEOUT = Integer.toString(30_000);
+   private static final String READ_TIMEOUT = Integer.toString(600_000);
+   
+   // VCAP Services environment nodes
+   private static final String VCAP_SERVICES = "VCAP_SERVICES";
+   private static final String SDM = "sdm";
+   private static final String CREDENTIALS = "credentials";
+   private static final String ENDPOINTS = "endpoints";
+   private static final String ECM_SERVICE = "ecmservice";
+   private static final String URL = "url";
+   private static final String UAA = "uaa";
+   private static final String ACCESS_TOKEN = "access_token";
+   private static final String TOKEN_ENDPOINT = "/oauth/token";
+   private static final String CLIENT_ID = "clientid";
+   private static final String CLIENT_SECRET = "clientsecret";
+   private static final String AUTHORIZATION = "Authorization";
+   private static final String CONTENT_TYPE = "Content-Type";
+   private static final String GRANT_TYPE = "client_credentials";
+   
+   // repository infos properties
+   private static final String REPOSITORIES_ENDPOINT = "rest/v2/repositories/";
+   private static final String REPO_AND_CONNECTION_INFOS = "repoAndConnectionInfos";
+   private static final String REPOSITORY = "repository";
+   private static final String ID = "id";
 
-  // VCAP Services environment nodes
-  private static final String VCAP_SERVICES = "VCAP_SERVICES";
-  private static final String SDM = "sdm";
-  private static final String CREDENTIALS = "credentials";
-  private static final String ENDPOINTS = "endpoints";
-  private static final String ECM_SERVICE = "ecmservice";
-  private static final String URL = "url";
-  private static final String UAA = "uaa";
-  private static final String ACCESS_TOKEN = "access_token";
-  private static final String TOKEN_ENDPOINT = "/oauth/token";
-  private static final String CLIENT_ID = "clientid";
-  private static final String CLIENT_SECRET = "clientsecret";
-  private static final String AUTHORIZATION = "Authorization";
-  private static final String CONTENT_TYPE = "Content-Type";
-  private static final String GRANT_TYPE = "client_credentials";
-
-  // repository infos properties
-  private static final String REPOSITORIES_ENDPOINT = "rest/v2/repositories/";
-  private static final String REPO_AND_CONNECTION_INFOS = "repoAndConnectionInfos";
-  private static final String REPOSITORY = "repository";
-  private static final String ID = "id";
-
-  private static volatile Session openCmisSession = null;
-
-  private EcmManager() {
-  }
-
-  public static Session getSession() {
-    if (openCmisSession == null) {
-      synchronized (EcmManager.class) {
-        if (openCmisSession == null) {
-          openCmisSession = new EcmManager().createCMISSession();
-        }
+   private static EcmManager instance;
+   private volatile Session openCmisSession;
+   
+   private EcmManager() {}
+   
+   public static synchronized EcmManager getInstance() {
+      if (instance == null) {
+         instance = new EcmManager();
       }
-    } else {
-      // stub to avoid CmisUnauthorizedException (session expires because of cookies)
-      synchronized (EcmManager.class) {
-        try {
-          openCmisSession.getRootFolder();
-        } catch (CmisUnauthorizedException e) {
-          openCmisSession = new EcmManager().createCMISSession();
-        }
+   
+      return instance;
+   }
+   
+   
+   public Session getSession() {
+      if (openCmisSession == null) {
+         synchronized (EcmManager.class) {
+            if (openCmisSession == null) {
+               openCmisSession = createCMISSession();
+            }
+         }
+      } else {
+         // stub to avoid CmisUnauthorizedException (session expires because of cookies)
+         synchronized (EcmManager.class) {
+            try {
+               openCmisSession.getRootFolder();
+            } catch (CmisUnauthorizedException e) {
+               openCmisSession = createCMISSession();
+            }
+         }
       }
-    }
-
-    return openCmisSession;
-  }
+   
+      return openCmisSession;
+   }
 
   private Session createCMISSession() {
     SessionFactory sessionFactory = SessionFactoryImpl.newInstance();
