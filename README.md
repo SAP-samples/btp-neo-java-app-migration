@@ -19,6 +19,9 @@ This is a simple example of a Java project that can be used as a supporting reso
 13. [Step 6. Document Management Service (ECM)](#step-6-document-management-service)
 14. [Step 7. Database](#step-7-database)
 15. [Step 8. SAP BTP CF Deployment](#step-8-sap-btp-cf-deployment)
+16. [Known issues](#known-issues)
+17. [How to obtain support](#how-to-obtain-support)
+18. [Contributing](#contributing)
 
 ## Requirements
 You have installed the following tools to be able to perform the steps described in this document:
