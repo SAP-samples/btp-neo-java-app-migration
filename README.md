@@ -1,4 +1,5 @@
 # Java Migration Procedure United
+[![REUSE status](https://api.reuse.software/badge/github.com/SAP-samples/btp-java-migration-procedure-united)](https://api.reuse.software/info/github.com/SAP-samples/btp-java-migration-procedure-united)
 
 ## Description
 This is a simple example of a Java project that can be used as a supporting resource for understanding Java applications' migration from SAP BTP Neo to SAP BTP Cloud Foundry.
