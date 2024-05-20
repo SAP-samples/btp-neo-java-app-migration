@@ -1,4 +1,4 @@
-# Java Migration Procedure United
+# Migrating BTP Neo Java Applications
 [![REUSE status](https://api.reuse.software/badge/github.com/SAP-samples/btp-java-migration-procedure-united)](https://api.reuse.software/info/github.com/SAP-samples/btp-java-migration-procedure-united)
 
 ## Description
