@@ -1023,6 +1023,9 @@ public class ImageServlet extends HttpServlet {
 ```
 </details>
 
+> Note: Simple and efficient example on how to migrate destinations from SAP BTP Neo to SAP BTP Cloud Foundry:
+> - [SAP BTP Neo Destinations Migration Sample](https://github.com/SAP-samples/btp-destination-service-samples)
+
 ### Step 5. Connectivity
 
 For SAP BTP Cloud Foundry, we can use the SAP Cloud SDK to establish a connection to an OnPremise system with SAP Cloud Connector. The SAP Cloud SDK provides an API to consume destinations created in the SAP BTP Cockpit.<br>
@@ -1148,9 +1151,6 @@ public class OnPremiseServlet extends HttpServlet {
 </details>
 
 SAP Cloud SDK connectivity [documentation](https://sap.github.io/cloud-sdk/docs/java/features/connectivity/on-premise)<br>
-
-> Note: Simple and efficient example on how to migrate destinations from SAP BTP Neo to SAP BTP Cloud Foundry: 
-> - [SAP BTP Neo Destinations Migration Sample](https://github.com/SAP-samples/btp-destination-service-samples)
 
 #### Run OnPremise demo application
 
