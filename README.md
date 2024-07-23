@@ -1149,6 +1149,9 @@ public class OnPremiseServlet extends HttpServlet {
 
 SAP Cloud SDK connectivity [documentation](https://sap.github.io/cloud-sdk/docs/java/features/connectivity/on-premise)<br>
 
+> Note: Simple and efficient example on how to migrate destinations from SAP BTP Neo to SAP BTP Cloud Foundry: 
+> - [SAP BTP Neo Destinations Migration Sample](https://github.com/SAP-samples/btp-destination-service-samples)
+
 #### Run OnPremise demo application
 
 ##### SAP Cloud Connector setup:
