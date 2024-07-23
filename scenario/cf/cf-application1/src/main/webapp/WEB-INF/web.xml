@@ -15,7 +15,7 @@
 
     <servlet>
         <servlet-name>UserInfoServlet</servlet-name>
-        <servlet-class>com.example.application1.UserInfoServlet</servlet-class>
+        <servlet-class>com.example.application1.servlet.UserInfoServlet</servlet-class>
     </servlet>
     <servlet-mapping>
         <servlet-name>UserInfoServlet</servlet-name>
@@ -24,7 +24,7 @@
 
     <servlet>
         <servlet-name>ManagementPageServlet</servlet-name>
-        <servlet-class>com.example.application1.ManagementPageServlet</servlet-class>
+        <servlet-class>com.example.application1.servlet.ManagementPageServlet</servlet-class>
     </servlet>
     <servlet-mapping>
         <servlet-name>ManagementPageServlet</servlet-name>
@@ -33,7 +33,7 @@
 
     <servlet>
         <servlet-name>ImageServlet</servlet-name>
-        <servlet-class>com.example.application1.ImageServlet</servlet-class>
+        <servlet-class>com.example.application1.servlet.ImageServlet</servlet-class>
     </servlet>
     <servlet-mapping>
         <servlet-name>ImageServlet</servlet-name>

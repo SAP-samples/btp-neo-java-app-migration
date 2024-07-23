@@ -1,4 +1,4 @@
-package com.example.application1;
+package com.example.application1.servlet;
 
 import com.example.application1.dao.PersonDAO;
 import com.example.application1.model.Person;

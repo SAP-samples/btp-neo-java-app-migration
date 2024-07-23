@@ -18,7 +18,6 @@
         <cf-tomcat-bom.version>1.93.0</cf-tomcat-bom.version>
         <sdk-modules-bom>4.30.0</sdk-modules-bom>
         <javax.servlet-api.version>4.0.1</javax.servlet-api.version>
-        <neo-java-web-api.version>4.73.10</neo-java-web-api.version>
         <eclipselink.version>2.7.12</eclipselink.version>
         <jackson-databind.version>2.15.1</jackson-databind.version>
         <ngdbc.version>2.20.17</ngdbc.version>
@@ -59,12 +58,6 @@
         <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-api</artifactId>
-            <scope>provided</scope>
-        </dependency>
-        <dependency>
-            <groupId>com.sap.cloud</groupId>
-            <artifactId>neo-java-web-api</artifactId>
-            <version>${neo-java-web-api.version}</version>
             <scope>provided</scope>
         </dependency>
         <dependency>

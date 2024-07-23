@@ -1,4 +1,4 @@
-package com.example.application1;
+package com.example.application1.servlet;
 
 import com.sap.cloud.sdk.cloudplatform.connectivity.HttpDestination;
 import com.sap.cloud.sdk.cloudplatform.connectivity.exception.DestinationNotFoundException;

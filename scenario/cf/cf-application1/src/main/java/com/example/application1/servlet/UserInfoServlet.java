@@ -1,4 +1,4 @@
-package com.example.application1;
+package com.example.application1.servlet;
 
 import com.example.application1.dto.UserDto;
 import com.fasterxml.jackson.databind.ObjectMapper;
