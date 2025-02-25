@@ -1,3 +1,7 @@
+[![REUSE status](https://api.reuse.software/badge/github.com/SAP-samples/btp-neo-java-app-migration)](https://api.reuse.software/info/github.com/SAP-samples/btp-neo-java-app-migration)
+
+
+
 ## Java Migration Guide Neo to CF
 
 ### Contents
