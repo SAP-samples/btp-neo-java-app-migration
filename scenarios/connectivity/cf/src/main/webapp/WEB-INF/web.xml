@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<web-app xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="https://jakarta.ee/xml/ns/jakartaee"
+    xsi:schemaLocation="https://jakarta.ee/xml/ns/jakartaee https://jakarta.ee/xml/ns/jakartaee/web-app_6_0.xsd"
+    id="WebApp_ID" version="6.0">
+
+    <!-- Main sample servlet mapped to / so that the integration test harness can detect readiness (generic for all samples) -->
+    <servlet>
+        <servlet-name>ConnectivityServlet</servlet-name>
+        <servlet-class>com.sap.cloud.sample.connectivity.ConnectivityServlet</servlet-class>
+    </servlet>
+    <servlet-mapping>
+        <servlet-name>ConnectivityServlet</servlet-name>
+        <url-pattern>/</url-pattern>
+    </servlet-mapping>
+</web-app>

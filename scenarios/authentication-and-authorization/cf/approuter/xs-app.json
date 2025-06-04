@@ -1,0 +1,30 @@
+{
+    "authenticationMethod": "route",
+    "routes": [
+        {
+            "source": "^/protected(/.*)?$",
+            "target": "/protected$1",
+            "destination": "backend-app-destination",
+            "authenticationType": "xsuaa",
+            "csrfProtection": false
+        },
+        {
+            "source": "^/logout-page",
+            "target": "/logout",
+            "destination": "backend-app-destination",
+            "authenticationType": "none",
+            "csrfProtection": false
+        },
+        {
+            "source": "^(/.*)",
+            "target": "$1",
+            "destination": "backend-app-destination",
+            "authenticationType": "none",
+            "csrfProtection": false
+        }
+    ],
+    "logout": {
+        "logoutEndpoint": "/logout",
+        "logoutPage": "/logout-page"
+    }
+}

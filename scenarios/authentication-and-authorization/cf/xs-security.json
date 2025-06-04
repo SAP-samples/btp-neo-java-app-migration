@@ -1,0 +1,26 @@
+{
+    "xsappname": "authentication-app",
+    "tenant-mode": "dedicated",
+    "scopes": [
+        {
+            "name": "$XSAPPNAME.Everyone",
+            "description": "Everyone"
+        }
+    ],
+    "role-templates": [
+        {
+            "name": "Everyone",
+            "scope-references": [
+                "$XSAPPNAME.Everyone"
+            ]
+        }
+    ],
+    "role-collections": [
+        {
+            "name": "authentication-app-rc",
+            "role-template-references": [
+                "$XSAPPNAME.Everyone"
+            ]
+        }
+    ]
+}
