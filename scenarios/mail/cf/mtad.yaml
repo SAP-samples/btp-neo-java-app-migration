@@ -1,0 +1,28 @@
+_schema-version: "3.2"
+ID: mail-app
+version: 0.0.1
+modules:
+- name: mail-app
+  type: java.tomcat
+  path: target/mail.war
+  parameters:
+    buildpack: sap_java_buildpack_jakarta
+    disk-quota: 512MB
+    memory: 512MB
+  properties:
+    ENABLE_SECURITY_JAVA_API_V2: true
+    SET_LOGGING_LEVEL: 'ROOT: INFO'
+  requires:
+    - name: mail-app-destination
+    - name: mail-app-connectivity
+resources:
+  - name: mail-app-destination
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: destination
+      service-plan: lite
+  - name: mail-app-connectivity
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: connectivity
+      service-plan: lite
