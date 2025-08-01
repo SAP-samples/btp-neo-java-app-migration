@@ -1,0 +1,65 @@
+{
+  "authenticationMethod": "route",
+  "routes": [
+    {
+      "source": "^/java/(.*)$",
+      "target": "$1",
+      "destination": "javamagement"
+    },
+    {
+      "source": "^/services/userapi(.*)",
+      "target": "$1",
+      "service": "sap-approuter-userapi"
+    },
+    {
+      "source": "^/resources/(.*)$",
+      "target": "/resources/$1",
+      "destination": "ui5",
+      "authenticationType": "none"
+    },
+    {
+      "source": "^/test-resources/(.*)$",
+      "target": "/test-resources/$1",
+      "destination": "ui5",
+      "authenticationType": "none"
+    },
+    {
+      "source": "^/webapp/resources/(.*)$",
+      "target": "/resources/$1",
+      "destination": "ui5",
+      "authenticationType": "none"
+    },
+    {
+      "source": "^/webapp/test-resources/(.*)$",
+      "target": "/test-resources/$1",
+      "destination": "ui5",
+      "authenticationType": "none"
+    },
+    {
+      "source": "^/logout.html$",
+      "service": "html5-apps-repo-rt",
+      "authenticationType": "none"
+    },
+    {
+      "source": "^[^/]\\.html$",
+      "service": "html5-apps-repo-rt",
+      "cacheControl": "private,max-age=0"
+    },
+    {
+      "source": "^sap-ui-cachebuster-info.json$",
+      "service": "html5-apps-repo-rt",
+      "cacheControl": "private,max-age=0"
+    },
+    {
+      "source": "^/(.*)$",
+      "service": "html5-apps-repo-rt",
+      "cacheControl": "public,max-age=31536000"
+    }
+  ],
+  "welcomeFile": "index.html",
+  "logout": {
+    "logoutEndpoint": "/logout",
+    "logoutMethod": "GET",
+    "logoutPage": "/logout.html"
+  }
+}

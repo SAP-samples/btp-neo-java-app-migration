@@ -1,0 +1,48 @@
+<mvc:View controllerName="javamigrationsample.controller.Master" xmlns:mvc="sap.ui.core.mvc" displayBlock="true" xmlns="sap.m">
+	<Shell id="shell">
+		<App id="app">
+			<pages>
+				<Page id="page" showHeader="false">
+					<content>
+						<Table id="idEmployeeTable" inset="false" items="{employeeModel>/}">
+							<headerToolbar>
+								<OverflowToolbar>
+									<content>
+										<Title text="{i18n>appDescription}" level="H2"/>
+										<ToolbarSpacer/>
+										<Text text="{parts: ['userInfoModel>/', 'i18n>currentUserLable'], formatter: '.formatCurrentUser'}"/>
+										<Button text="{i18n>addEmployeeBtn}" press="onAddEmpoyeePress"/>
+									</content>
+								</OverflowToolbar>
+							</headerToolbar>
+							<columns>
+								<Column width="12em">
+									<Text text="{i18n>avatarCol}"/>
+								</Column>
+								<Column minScreenWidth="Tablet" demandPopin="true">
+									<Text text="{i18n>firstNameCol}"/>
+								</Column>
+								<Column minScreenWidth="Desktop" demandPopin="true">
+									<Text text="{i18n>lastNameCol}"/>
+								</Column>
+								<Column minScreenWidth="Desktop" demandPopin="true">
+									<Text text="{i18n>actionsCol}"/>
+								</Column>
+							</columns>
+							<items>
+								<ColumnListItem vAlign="Middle">
+									<cells>
+										<Avatar src= "{path: 'employeeModel>imageId', formatter: '.formatAvatar'}" displaySize="S" backgroundColor="Accent3"/>
+										<Text text="{employeeModel>firstName}"/>
+										<Text text="{employeeModel>lastName}"/>
+										<Button icon= "sap-icon://delete" press="onDeleteEmployeePress"/>
+									</cells>
+								</ColumnListItem>
+							</items>
+						</Table>
+					</content>
+				</Page>
+			</pages>
+		</App>
+	</Shell>
+</mvc:View>

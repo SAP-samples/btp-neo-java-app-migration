@@ -1,3 +1,0 @@
----
-tomee/webapps/ROOT/META-INF/context.xml:
-  service_name_for_DefaultDB: persistence-javaee10-app-hana

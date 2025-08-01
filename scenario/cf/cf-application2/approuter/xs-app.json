@@ -1,0 +1,12 @@
+{
+  "authenticationMethod": "route",
+  "routes": [
+    {
+      "source": "^(/.*)",
+      "target": "$1",
+      "destination": "cf-app2-destination",
+      "authenticationType": "xsuaa",
+      "csrfProtection": false
+    }
+  ]
+}
