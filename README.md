@@ -2,6 +2,14 @@
 
 
 # Migration Guide for Java Applications from the Neo Environment to the Cloud Foundry Environment
+Please visit the following links to check the migration process for the classic BTP Java application including the following parts
+- Cloud SDK
+- Security
+- Connectivity
+- and more
+
+1) [SAP Java Buildpack v1 sample](https://github.com/SAP-samples/btp-neo-java-app-migration/tree/migration-example-old)
+2) [SAP Java Buildpack v2 sample](https://github.com/SAP-samples/btp-neo-java-app-migration/tree/migration-example-new)
 
 ## Table of Contents
 1. [Purpose](#1-purpose)
