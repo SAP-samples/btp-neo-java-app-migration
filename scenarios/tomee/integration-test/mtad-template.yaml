@@ -13,8 +13,8 @@ modules:
     TARGET_RUNTIME: tomee
     ENABLE_SECURITY_JAVA_API_V2: true
     JBP_CONFIG_RESOURCE_CONFIGURATION:
-    - tomee/webapps/ROOT/META-INF/context.xml:
-        service_name_for_DefaultDB: ${APP_NAME}-hana
+      - tomee/webapps/ROOT/WEB-INF/resources.xml:
+          service_name_for_DefaultDB: ${APP_NAME}-hana
     SET_LOGGING_LEVEL: 'ROOT: INFO'
   requires:
     - name: ${APP_NAME}-hana

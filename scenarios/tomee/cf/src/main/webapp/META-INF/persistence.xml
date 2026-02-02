@@ -6,7 +6,7 @@
         <jta-data-source>jdbc/DefaultDB</jta-data-source>
         <class>com.sap.cloud.sample.persistence.Person</class>
         <properties>
-            <property name="eclipselink.ddl-generation" value="create-tables" />
+            <property name="eclipselink.ddl-generation" value="create-or-extend-tables" />
             <property name="eclipselink.logging.level" value="SEVERE" />
         </properties>
     </persistence-unit>

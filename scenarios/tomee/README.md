@@ -105,24 +105,27 @@ resources:
 4. Create the file structure `webapp/META-INF/sap_java_buildpack/config/resource_configuration.yml` with the following content:
 ```yaml
 ---
-tomee/webapps/ROOT/META-INF/context.xml:
+tomee/webapps/ROOT/WEB-INF/resources.xml:
   service_name_for_DefaultDB: <service-instance-name>
 ```
-5. Under `webapp/META-INF`, create a `resources.xml` file:
+
+5. Under `webapp/WEB-INF`, create a `resources.xml` file:
 ```xml
 <?xml version='1.0' encoding='utf-8'?>
-
 <resources>
-  <Resource id="jdbc/DefaultD"
+  <Resource id="jdbc/DefaultDB"
             provider="xs.openejb:XS Default JDBC Database"
-            type="javax.sql.DataSource"
-            service="${service_name_for_DefaultDB}" />
+            type="javax.sql.DataSource">
+    service=${service_name_for_DefaultDB}
+  </Resource>
 </resources>
 ```
 
 6. Add the following line to the application module's properties in the `mtad.yaml` file. This is how the name of the service instance is passed to the application.
 ```yaml
-JBP_CONFIG_RESOURCE_CONFIGURATION: [ "tomee/webapps/ROOT/META-INF/context.xml": { "service_name_for_DefaultDB": "<service-instance-name>" } ]
+JBP_CONFIG_RESOURCE_CONFIGURATION:
+  - tomee/webapps/ROOT/WEB-INF/resources.xml:
+      service_name_for_DefaultDB: <service-instance-name>
 ```
 ## Related Information
 - [TomEE-10 documentation| SAP Help Portal](https://help.sap.com/docs/btp/sap-business-technology-platform/tomee-10)
