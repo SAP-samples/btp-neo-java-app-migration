@@ -1,0 +1,5 @@
+{
+  "cfSubaccountId": "<cf-subaccount-guid>",
+  "cfRegion": "<region, e.g. eu10, us10>",
+  "btpGlobalAccountSubdomain": "<global-account-subdomain>"
+}

@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Tomcat Context Configuration for SAP BTP Cloud Foundry
+  
+  Location: src/main/webapp/META-INF/context.xml
+  
+  This configures the DataSource that will be injected by the 
+  sap_java_buildpack_jakarta from the bound HANA service.
+  
+  See resource_configuration.yml for service name mapping.
+-->
+<Context>
+    <!--
+      DataSource Configuration
+      
+      The ${service_name_for_DefaultDB} placeholder is replaced at deployment time
+      with the actual service name from resource_configuration.yml
+    -->
+    <Resource name="jdbc/DefaultDB"
+              auth="Container"
+              type="javax.sql.DataSource"
+              factory="com.sap.xs.jdbc.datasource.tomcat.TomcatDataSourceFactory"
+              service="${service_name_for_DefaultDB}"/>
+    
+    <!--
+      Additional DataSource example (for multiple databases):
+      
+      <Resource name="jdbc/SecondaryDB"
+                auth="Container"
+                type="javax.sql.DataSource"
+                factory="com.sap.xs.jdbc.datasource.tomcat.TomcatDataSourceFactory"
+                service="${service_name_for_SecondaryDB}"/>
+    -->
+</Context>

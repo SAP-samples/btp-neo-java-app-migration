@@ -1,0 +1,73 @@
+{
+  "xsappname": "${app-name}",
+  "tenant-mode": "dedicated",
+  "oauth2-configuration": {
+    "token-validity": 7200,
+    "redirect-uris": [
+      "https://*.cfapps.*.hana.ondemand.com/**"
+    ]
+  },
+  "scopes": [
+    {
+      "name": "$XSAPPNAME.Read",
+      "description": "Read access"
+    },
+    {
+      "name": "$XSAPPNAME.Write",
+      "description": "Write access"
+    },
+    {
+      "name": "$XSAPPNAME.Admin",
+      "description": "Administrator access"
+    }
+  ],
+  "role-templates": [
+    {
+      "name": "Viewer",
+      "description": "View application data",
+      "scope-references": [
+        "$XSAPPNAME.Read"
+      ]
+    },
+    {
+      "name": "Editor",
+      "description": "Edit application data",
+      "scope-references": [
+        "$XSAPPNAME.Read",
+        "$XSAPPNAME.Write"
+      ]
+    },
+    {
+      "name": "Administrator",
+      "description": "Full access",
+      "scope-references": [
+        "$XSAPPNAME.Read",
+        "$XSAPPNAME.Write",
+        "$XSAPPNAME.Admin"
+      ]
+    }
+  ],
+  "role-collections": [
+    {
+      "name": "${app-name}-viewers",
+      "description": "Users with read access",
+      "role-template-references": [
+        "$XSAPPNAME.Viewer"
+      ]
+    },
+    {
+      "name": "${app-name}-editors",
+      "description": "Users with edit access",
+      "role-template-references": [
+        "$XSAPPNAME.Editor"
+      ]
+    },
+    {
+      "name": "${app-name}-admins",
+      "description": "Administrators",
+      "role-template-references": [
+        "$XSAPPNAME.Administrator"
+      ]
+    }
+  ]
+}

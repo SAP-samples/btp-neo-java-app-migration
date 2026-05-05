@@ -1,0 +1,98 @@
+# SAP BTP Cloud Foundry - MTA with Approuter Template
+#
+# Usage: Copy and customize for applications requiring authentication.
+# This template includes:
+# - Java backend application
+# - Approuter for authentication
+# - XSUAA service binding
+#
+# Replace ${app-name} placeholders with your application name.
+
+_schema-version: "3.2"
+ID: ${app-name}
+version: 0.0.1
+
+parameters:
+  enable-parallel-deployments: true
+
+modules:
+  # ========================
+  # Approuter (Entry Point)
+  # ========================
+  - name: ${app-name}-approuter
+    type: nodejs
+    path: approuter
+    parameters:
+      disk-quota: 256M
+      memory: 256M
+      routes:
+        - route: '${protocol}://${app-name}.${default-domain}'
+          protocol: http1
+    properties:
+      XS_APP_LOG_LEVEL: debug
+      TENANT_HOST_PATTERN: '(.*).cfapps.sap.hana.ondemand.com'
+      CF_NODEJS_LOGGING_LEVEL: "info"
+    requires:
+      - name: ${app-name}-xsuaa
+      - name: ${app-name}-java-app
+        group: destinations
+        properties:
+          name: backend-app-destination
+          url: '~{neo-app-url}'
+          forwardAuthToken: true
+
+  # ========================
+  # Backend Java Application
+  # ========================
+  - name: ${app-name}
+    type: java.tomcat
+    path: target/${app-name}.war
+    parameters:
+      buildpack: sap_java_buildpack_jakarta
+      disk-quota: 512MB
+      memory: 512MB
+    properties:
+      ENABLE_SECURITY_JAVA_API_V2: true
+      SET_LOGGING_LEVEL: 'ROOT: INFO'
+      # Java 25 runtime configuration (REQUIRED for sap_java_buildpack_jakarta)
+      JBP_CONFIG_COMPONENTS: "jres: ['com.sap.xs.java.buildpack.jre.SAPMachineJRE']"
+      JBP_CONFIG_SAP_MACHINE_JRE: '{ version: 25.+ }'
+    requires:
+      - name: ${app-name}-xsuaa
+      - name: ${app-name}-destination
+      # Uncomment as needed:
+      # - name: ${app-name}-connectivity
+      # - name: ${app-name}-hana
+    provides:
+      - name: ${app-name}-java-app
+        properties:
+          neo-app-url: '${default-url}'
+
+# ========================
+# Resources (Services)
+# ========================
+resources:
+  # XSUAA for authentication
+  - name: ${app-name}-xsuaa
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: xsuaa
+      service-plan: application
+      path: ./xs-security.json
+
+  # Destination service (required for approuter)
+  - name: ${app-name}-destination
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: destination
+      service-plan: lite
+
+  # Uncomment required services:
+  # - name: ${app-name}-connectivity
+  #   type: org.cloudfoundry.managed-service
+  #   parameters:
+  #     service: connectivity
+  #     service-plan: lite
+  #
+  # - name: ${app-name}-hana
+  #   type: com.sap.xs.hana-schema

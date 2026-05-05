@@ -17,9 +17,9 @@
     </licenses>
 
     <properties>
-        <maven.compiler.source>17</maven.compiler.source>
-        <maven.compiler.target>17</maven.compiler.target>
-
+        <maven.compiler.source>25</maven.compiler.source>
+        <maven.compiler.target>25</maven.compiler.target>
+        
         <cf-tomcat-bom-version>2.22.0</cf-tomcat-bom-version>
         <sdk-modules-bom-version>5.14.0</sdk-modules-bom-version>
         <lombom.version>1.18.24</lombom.version>

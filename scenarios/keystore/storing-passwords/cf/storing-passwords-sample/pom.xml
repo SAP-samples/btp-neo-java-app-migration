@@ -22,8 +22,8 @@
     </licenses>
 
     <properties>
-        <maven.compiler.source>17</maven.compiler.source>
-        <maven.compiler.target>17</maven.compiler.target>
+        <maven.compiler.source>25</maven.compiler.source>
+        <maven.compiler.target>25</maven.compiler.target>
 
         <credential-store-client.version>1.0.0</credential-store-client.version>
         <jakarta.servlet-api.version>6.1.0</jakarta.servlet-api.version>

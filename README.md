@@ -26,7 +26,8 @@ Please visit the following links to check the migration process for the classic 
 
     3.3 [Analyze the Dependencies of Your Java Application](#33-analyze-the-dependencies-of-your-java-applications)
 
-4. [Migrate to Jakarta EE 10 and Java 17](#4-migrate-to-jakarta-ee-10-and-java-17)
+
+4. [Migrate to Jakarta EE 10 and Java 25](#4-migrate-to-jakarta-ee-10-and-java-25)
   
 5. [Replace the Neo Java Web API with the SAP Cloud SDK](#5-replace-the-neo-java-web-api-with-the-sap-cloud-sdk)
 
@@ -63,6 +64,8 @@ Please visit the following links to check the migration process for the classic 
     8.2 [Deploy the Java Application to the Cloud Foundry Environment](#82-deploy-the-java-application-to-the-cloud-foundry-environment)
 
 9. [Access the Java Application](#9-access-the-java-application)
+
+10. [AI Assisted Migration](#10-ai-assisted-migration)
 
 ## 1. Purpose
 
@@ -126,9 +129,9 @@ If any necessary dependencies or sources are missing, search for additional repo
 
 > Note: Please have in mind that you may also need to clone some other dependencies. These are usually dependencies whose `groupId` starts with the same top-level domain and first subdomain as the project's `groupId`. For example, if the project's `groupId` starts with `org.example`, you may also need to clone all dependencies that start with `org.example`.
 
-## 4. Migrate to Jakarta EE 10 and Java 17
+## 4. Migrate to Jakarta EE 10 and Java 25
 
-You can migrate your Java application to Java 17 to improve its performance, security, and maintainability. OpenRewrite recipes are used to perform the migration. For more information, see [Migration to Jakarta EE 10 and Java 17](scenarios/jakarta10-and-java17-migration).
+You can migrate your Java application to Java 25 to improve its performance, security, and maintainability. OpenRewrite recipes are used to perform the migration. For more information, see [Migration to Jakarta EE 10 and Java 25](scenarios/jakarta10-and-java25-migration).
 
 ## 5. Replace the Neo Java Web API with the SAP Cloud SDK
 The Neo Java Web API dependency is not provided in Cloud Foundry, so it must be replaced by SAP Cloud SDK dependencies.<br>
@@ -394,7 +397,7 @@ You can find an example of an MTA deployment descriptor in [MTA Deployment Descr
       type: org.cloudfoundry.managed-service
       parameters:
         service: sdm
-        service-plan: free
+        service-plan: standard
     # Needed for persistence:
     - name: <app-name>-hana 
       type: com.sap.xs.hana-schema
@@ -421,3 +424,6 @@ You can deploy the application by executing the following commands:
 ## 9. Access the Java Application
 You can access the application in a browser using the application URL. You can find the application URL on the **Overview** page of your application in the SAP BTP cockpit.
 The format of the application URL is `https://<app-name>.cfapps.<cf-app-domain>`.
+
+## 10. AI Assisted Migration
+You can perform an AI assisted migration using the [AI Assisted Migration](./ai-migration/README.md) guide.

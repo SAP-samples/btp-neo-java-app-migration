@@ -1,0 +1,10 @@
+{
+  "neoSubaccount": "<technical-name>",
+  "neoRegionHost": "<region>.hana.ondemand.com",
+  "auth": {
+    "method": "clientCredentials",
+    "clientId": "<platform-api-client-id>",
+    "clientSecret": "<platform-api-client-secret>",
+    "bearerToken": ""
+  }
+}

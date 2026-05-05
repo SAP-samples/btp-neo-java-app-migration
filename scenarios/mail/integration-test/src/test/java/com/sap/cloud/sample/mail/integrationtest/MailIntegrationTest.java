@@ -7,7 +7,6 @@ import static org.junit.Assert.assertThat;
 
 import javax.servlet.http.HttpServletResponse;
 
-import com.sap.jpaas.test.framework.util.Utils;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -27,7 +26,7 @@ public class MailIntegrationTest {
     public static final String LOCALHOST = "localhost";
     public static final String SUBJECT_TEXT = "subjecttext";
     public static final String MAIL_TEXT = "mailtext";
-    public static final String SENT_RESPONSE = "E-mail was sent (in local scenario stored in '<local-server>/work/mailservice')";
+    public static final String SENT_RESPONSE = "E-mail was sent";
 
     private static final String LOCAL_TEST_EMAIL = "local-test@sap.com";
     private static final String HELLO_WORLD = "Hello World!";
@@ -93,12 +92,11 @@ public class MailIntegrationTest {
                     break;
                 }
             } catch (com.meterware.httpunit.HttpInternalErrorException e) {
-                Utils.printlnFormatted("Attempt " + (retryCount + 1) + " failed with HttpInternalErrorException");
+                System.out.println("Attempt " + (retryCount + 1) + " failed with HttpInternalErrorException");
             }
             
-            Utils.printlnFormatted("Attempt " + (retryCount + 1) + " failed with response code: " + response.getResponseCode());
-            Utils.printlnFormatted("Response text: " + response.getText());
-            
+            System.out.println("Attempt " + (retryCount + 1) + " failed with response code: " + response.getResponseCode());
+            System.out.println("Response text: " + response.getText());
             retryCount++;
         }
 

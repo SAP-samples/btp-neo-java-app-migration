@@ -1,0 +1,71 @@
+# SAP BTP Cloud Foundry - Base MTA Descriptor Template
+#
+# Usage: Copy and customize for your application.
+# Replace ${app-name} placeholders with your application name.
+#
+# See: https://help.sap.com/docs/HANA_CLOUD_DATABASE/c2b99f19e9264c4d9ae9221b22f6f589/d04fc0e2ad894545b0a6a0bfe7aa7c0f.html
+
+_schema-version: "3.2"
+ID: ${app-name}
+version: 0.0.1
+
+parameters:
+  # Enable parallel deployment for faster deploys
+  enable-parallel-deployments: true
+
+modules:
+  - name: ${app-name}
+    type: java.tomcat
+    path: target/${app-name}.war
+    parameters:
+      # Jakarta EE buildpack for Java 25 + Jakarta EE 10
+      buildpack: sap_java_buildpack_jakarta
+      # Resource allocation
+      disk-quota: 512MB
+      memory: 512MB
+      # Optional: Enable SSH for debugging
+      # enable-ssh: true
+    properties:
+      # Enable SAP Cloud SDK security API v2
+      ENABLE_SECURITY_JAVA_API_V2: true
+      # Logging configuration
+      SET_LOGGING_LEVEL: 'ROOT: INFO, com.example: DEBUG'
+      # Java 25 runtime configuration (REQUIRED for sap_java_buildpack_jakarta)
+      JBP_CONFIG_COMPONENTS: "jres: ['com.sap.xs.java.buildpack.jre.SAPMachineJRE']"
+      JBP_CONFIG_SAP_MACHINE_JRE: '{ version: 25.+ }'
+      # JVM options (optional)
+      # JBP_CONFIG_JAVA_OPTS: '[java_opts: "-Xmx384m -Xms128m"]'
+    provides:
+      - name: ${app-name}-api
+        properties:
+          url: ${default-url}
+    # Uncomment and add required services:
+    # requires:
+    #   - name: ${app-name}-xsuaa
+    #   - name: ${app-name}-destination
+    #   - name: ${app-name}-connectivity
+    #   - name: ${app-name}-hana
+
+# Uncomment required resources:
+# resources:
+#   - name: ${app-name}-xsuaa
+#     type: org.cloudfoundry.managed-service
+#     parameters:
+#       service: xsuaa
+#       service-plan: application
+#       path: xs-security.json
+#
+#   - name: ${app-name}-destination
+#     type: org.cloudfoundry.managed-service
+#     parameters:
+#       service: destination
+#       service-plan: lite
+#
+#   - name: ${app-name}-connectivity
+#     type: org.cloudfoundry.managed-service
+#     parameters:
+#       service: connectivity
+#       service-plan: lite
+#
+#   - name: ${app-name}-hana
+#     type: com.sap.xs.hana-schema
