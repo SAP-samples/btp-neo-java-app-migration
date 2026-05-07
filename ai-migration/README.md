@@ -46,7 +46,7 @@ claude plugin update sap-btp-neo-migration@sap-btp-neo-migration-tools
 
 ### GitHub Copilot (VS Code)
 
-VS Code natively recognizes the Agent Skills `SKILL.md` format. Copy the skill directories from `ai-migration/neo-java-migration-skills-plugin/skills/` into `.github/skills/` in your project. Copilot will discover the skills automatically and invoke them based on the `description` in each skill's frontmatter. You can also invoke them explicitly by name in Copilot Chat (Agent mode):
+VS Code natively recognizes the Agent Skills `SKILL.md` format. Copy the skill directories from `ai-migration/neo-java-migration-skills/skills/` into `.github/skills/` in your project. Copilot will discover the skills automatically and invoke them based on the `description` in each skill's frontmatter. You can also invoke them explicitly by name in Copilot Chat (Agent mode):
 
 ```
 Use the neo-to-cf-migration-orchestrator skill to migrate my Neo application
@@ -63,7 +63,7 @@ For personal (user-level) skills, copy to `~/.copilot/skills/` instead.
 
 ### Cursor
 
-Cursor natively supports the Agent Skills `SKILL.md` format. Copy the skill directories from `ai-migration/neo-java-migration-skills-plugin/skills/` into `.cursor/skills/` in your project. Cursor discovers them automatically at startup and invokes them based on the `description` in each skill's frontmatter — no explicit mention required.
+Cursor natively supports the Agent Skills `SKILL.md` format. Copy the skill directories from `ai-migration/neo-java-migration-skills/skills/` into `.cursor/skills/` in your project. Cursor discovers them automatically at startup and invokes them based on the `description` in each skill's frontmatter — no explicit mention required.
 
 For personal (user-level) skills, copy to `~/.cursor/skills/` instead.
 
@@ -170,45 +170,43 @@ Use the jakarta-java25-migration skill to upgrade to Java 25
 ## Plugin Structure
 
 ```
-neo-migration-skills-plugin/
+.claude-plugin/
+├── marketplace.json            # Marketplace manifest
 ├── plugin.json                 # Plugin manifest
-├── README.md                   # This file
-├── CHANGELOG.md                # Version history
-├── LICENSE                     # Apache-2.0
-│
-├── skills/                     # All migration skills
-│   ├── jakarta-java25-migration/
-│   │   └── SKILL.md
-│   ├── sdk-replacement/
-│   │   ├── SKILL.md
-│   │   └── assets/
-│   ├── authentication-xsuaa/
-│   │   ├── SKILL.md
-│   │   ├── assets/
-│   │   └── references/
-│   ├── destinations/
-│   ├── connectivity-onpremise/
-│   ├── persistence-hana/
-│   ├── document-management-sdm/
-│   ├── mail-destinations/
-│   ├── keystore-credstore/
-│   ├── monitoring-logging/
-│   ├── tomee-runtime/
-│   └── neo-to-cf-migration-orchestrator/
-│
-├── marketplace/                # Marketplace metadata
-│   ├── icon.svg
-│   ├── screenshot-1.png
-│   └── description.md
-│
-└── docs/                       # Additional documentation
-    ├── MIGRATION-GUIDE.md
-    └── examples/
+
+ai-migration/
+├── neo-java-migration-skills/
+    ├── skills/                 # All migration skills
+    │   ├── approuter-setup/
+    │   ├── authentication-xsuaa/
+    │   ├── btp-cli-reference/
+    │   ├── cf-cli-reference/
+    │   ├── connectivity-onpremise/
+    │   ├── dependency-compatibility/
+    │   ├── destinations/
+    │   ├── document-management-sdm/
+    │   ├── jakarta-java25-migration/
+    │   ├── keystore-credstore/
+    │   ├── mail-destinations/
+    │   ├── monitoring-logging/
+    │   ├── mta-descriptor/
+    │   ├── neo-to-cf-migration-orchestrator/
+    │   ├── persistence-hana/
+    │   ├── sdk-replacement/
+    │   ├── subaccount-migration-orchestrator/
+    │   ├── subaccount-roles-export/
+    │   ├── subaccount-roles-import/
+    │   ├── subaccount-trust-export/
+    │   ├── subaccount-trust-import/
+    │   ├── tomee-runtime/
+    │
+    ├── marketplace/
+        ├── description.md
 ```
 
 ## Skill Discovery
 
-Once installed, Claude Code automatically discovers all 12 skills via their SKILL.md frontmatter metadata. Skills can be invoked by:
+Once installed, Claude Code automatically discovers all 22 skills via their SKILL.md frontmatter metadata. Skills can be invoked by:
 
 - **Name**: "authentication-xsuaa"
 - **Keywords**: "XSUAA", "authentication", "OAuth"
@@ -354,7 +352,7 @@ Plugin integrates with Claude Code via:
 ### 1.0.0 (Current)
 
 - Initial Claude Code plugin release
-- 12 modular migration skills
+- 22 modular migration skills
 - Agent Skills standard compliance
 - Full orchestration support
 - Progressive disclosure architecture
