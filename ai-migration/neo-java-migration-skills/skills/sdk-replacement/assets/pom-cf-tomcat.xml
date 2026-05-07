@@ -1,0 +1,156 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SAP BTP Cloud Foundry - Tomcat Application POM Template
+  
+  Usage: Copy this template to your project root and customize:
+  1. Update groupId, artifactId, and version
+  2. Adjust SDK versions if needed
+  3. Add application-specific dependencies
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 
+                             http://maven.apache.org/maven-v4_0_0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <!-- TODO: Update project coordinates -->
+    <groupId>com.example</groupId>
+    <artifactId>my-cf-app</artifactId>
+    <version>1.0.0-SNAPSHOT</version>
+    <packaging>war</packaging>
+
+    <properties>
+        <!-- Compiler settings -->
+        <java.version>25</java.version>
+        <maven.compiler.source>${java.version}</maven.compiler.source>
+        <maven.compiler.target>${java.version}</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+
+        <!-- SAP BTP SDK versions -->
+        <cf-tomcat-bom-version>2.22.0</cf-tomcat-bom-version>
+        <sdk-modules-bom-version>5.14.0</sdk-modules-bom-version>
+    </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <!-- CF Tomcat BOM - provides Servlet, JSTL, etc. -->
+            <dependency>
+                <groupId>com.sap.cloud.sjb.cf</groupId>
+                <artifactId>cf-tomcat-bom</artifactId>
+                <version>${cf-tomcat-bom-version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <!-- SAP Cloud SDK BOM -->
+            <dependency>
+                <groupId>com.sap.cloud.sdk</groupId>
+                <artifactId>sdk-modules-bom</artifactId>
+                <version>${sdk-modules-bom-version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <dependencies>
+        <!-- SAP Cloud SDK for Cloud Foundry -->
+        <dependency>
+            <groupId>com.sap.cloud.sdk.cloudplatform</groupId>
+            <artifactId>scp-cf</artifactId>
+        </dependency>
+
+        <!-- Jakarta Servlet API (provided by Tomcat) -->
+        <dependency>
+            <groupId>jakarta.servlet</groupId>
+            <artifactId>jakarta.servlet-api</artifactId>
+            <scope>provided</scope>
+        </dependency>
+
+        <!-- SLF4J Logging -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>ch.qos.logback</groupId>
+            <artifactId>logback-classic</artifactId>
+        </dependency>
+
+        <!-- ======================= -->
+        <!-- Optional dependencies   -->
+        <!-- ======================= -->
+
+        <!-- XSUAA Security (uncomment if using authentication) -->
+        <!--
+        <dependency>
+            <groupId>com.sap.cloud.security</groupId>
+            <artifactId>java-security</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.sap.cloud.security.xsuaa</groupId>
+            <artifactId>xsuaa-spring-boot-starter</artifactId>
+        </dependency>
+        -->
+
+        <!-- JSON Processing (Jackson) -->
+        <!--
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+        -->
+
+        <!-- HTTP Client for external calls -->
+        <!--
+        <dependency>
+            <groupId>org.apache.httpcomponents</groupId>
+            <artifactId>httpclient</artifactId>
+        </dependency>
+        -->
+
+        <!-- ======================= -->
+        <!-- Test dependencies       -->
+        <!-- ======================= -->
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>5.10.0</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <finalName>${project.artifactId}</finalName>
+        <plugins>
+            <!-- Compiler Plugin -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.11.0</version>
+                <configuration>
+                    <source>${java.version}</source>
+                    <target>${java.version}</target>
+                </configuration>
+            </plugin>
+
+            <!-- WAR Plugin -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-war-plugin</artifactId>
+                <version>3.4.0</version>
+                <configuration>
+                    <warName>${project.artifactId}</warName>
+                    <!-- For servlet 5.0+, web.xml is optional -->
+                    <failOnMissingWebXml>false</failOnMissingWebXml>
+                </configuration>
+            </plugin>
+
+            <!-- Surefire Plugin for tests -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.1.2</version>
+            </plugin>
+        </plugins>
+    </build>
+</project>

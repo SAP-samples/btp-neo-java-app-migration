@@ -20,4 +20,4 @@ resources:
     type: org.cloudfoundry.managed-service
     parameters:
       service: sdm
-      service-plan: free
+      service-plan: standard

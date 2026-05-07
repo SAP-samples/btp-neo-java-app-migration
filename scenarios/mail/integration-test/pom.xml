@@ -48,12 +48,6 @@
             <version>${httpunit.version}</version>
             <scope>test</scope>
         </dependency>
-        <dependency>
-            <groupId>com.sap.jpaas.test.framework</groupId>
-            <artifactId>com.sap.jpaas.test.framework.util</artifactId>
-            <version>${test.framework.version}</version>
-            <scope>test</scope>
-        </dependency>
     </dependencies>
 
     <build>

@@ -1,0 +1,21 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "sap-btp-neo-migration-tools",
+  "description": "Collection of SAP BTP Neo to Cloud Foundry migration skills",
+  "owner": {
+    "name": "SAP Open Source"
+  },
+  "plugins": [
+    {
+      "name": "sap-btp-neo-migration",
+      "description": "Migrate SAP BTP Neo Java applications to Cloud Foundry with Jakarta EE, XSUAA, and HANA Cloud",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/SAP-samples/btp-neo-java-app-migration.git",
+        "path": "ai-migration/neo-java-migration-skills",
+        "ref": "main"
+      },
+      "category": "migration"
+    }
+  ]
+}

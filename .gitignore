@@ -5,15 +5,22 @@ resources/
 
 # IDE
 .idea/
-target
+.vscode/
+.DS_Store
 
 # Web IDE, App Studio
 .che/
 .gen/
 
-.DS_Store
-
 package-lock.json
+
+# Compiled class file
+*.class
+.classpath
+.project
+
+# Log file
+*.log
 
 # MTA
 *_mta_build_tmp

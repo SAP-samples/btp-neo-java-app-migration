@@ -1,0 +1,30 @@
+# SAP Java Buildpack Resource Configuration
+#
+# Location: src/main/webapp/META-INF/sap_java_buildpack/config/resource_configuration.yml
+#
+# This file maps placeholders in context.xml (Tomcat) or resources.xml (TomEE) 
+# to actual CF service binding names.
+#
+# See: https://help.sap.com/docs/btp/sap-business-technology-platform/configure-application-tomcat
+
+---
+# ========================
+# Tomcat Configuration
+# ========================
+# For Tomcat-based applications, map context.xml placeholders
+
+tomcat/webapps/ROOT/META-INF/context.xml:
+  # Maps ${service_name_for_DefaultDB} placeholder to actual service name
+  service_name_for_DefaultDB: ${app-name}-hana
+  
+  # Example for multiple databases:
+  # service_name_for_SecondaryDB: ${app-name}-secondary-hana
+
+
+# ========================
+# TomEE Configuration
+# ========================
+# For TomEE-based applications (uncomment if using TomEE)
+
+# tomee/webapps/ROOT/META-INF/resources.xml:
+#   service_name_for_DefaultDB: ${app-name}-hana

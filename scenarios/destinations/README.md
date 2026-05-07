@@ -61,7 +61,7 @@ Here are some guidelines to follow when refactoring your code.<br>
   - **Cloud Foundry environment**: Use `com.sap.cloud.sdk.cloudplatform.connectivity.HttpDestination` retrieved from `com.sap.cloud.sdk.cloudplatform.connectivity.DestinationAccessor`.
 
  >Note:<br> 
- > * For Java 17 and above, use [`Cloud SDK v5 DestinationAccessor` | sap.github.io](https://sap.github.io/cloud-sdk/docs/java/features/connectivity/btp-destination-service) and [`Cloud SDK v5 HttpDestination` | sap.github.io](https://sap.github.io/cloud-sdk/docs/java/features/connectivity/http-destinations).<br>
+ > * For Java 25 and above, use [`Cloud SDK v5 DestinationAccessor` | sap.github.io](https://sap.github.io/cloud-sdk/docs/java/features/connectivity/btp-destination-service) and [`Cloud SDK v5 HttpDestination` | sap.github.io](https://sap.github.io/cloud-sdk/docs/java/features/connectivity/http-destinations).<br>
  >
  > * For Java 8 and 11, use `Cloud SDK v4 DestinationAccessor` and `Cloud SDK v4 HttpDestination`. For more information, see [Use Destinations To Connect To Other Systems and Services | sap.github.io](https://sap.github.io/cloud-sdk/docs/java/v4/features/connectivity/destination-service).
     

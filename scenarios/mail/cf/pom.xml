@@ -17,7 +17,7 @@
     </licenses>
 
     <properties>
-        <sap.cloud.jdk.version>17</sap.cloud.jdk.version>
+        <sap.cloud.jdk.version>25</sap.cloud.jdk.version>
         <sdk-modules-bom-version>5.14.0</sdk-modules-bom-version>
         <cf-tomcat-bom-version>2.22.0</cf-tomcat-bom-version>
         <scp-cf.xsuaa-client.version>3.5.6</scp-cf.xsuaa-client.version>

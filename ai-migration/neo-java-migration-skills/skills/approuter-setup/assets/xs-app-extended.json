@@ -1,0 +1,44 @@
+{
+    "authenticationMethod": "route",
+    "routes": [
+        {
+            "source": "^/protected(/.*)?$",
+            "target": "/protected$1",
+            "destination": "<destination-name>",
+            "authenticationType": "xsuaa",
+            "csrfProtection": false
+        },
+        {
+            "source": "^/authentication/endpoint(/.*)",
+            "target": "$1",
+            "destination": "<destination-name>",
+            "authenticationType": "xsuaa",
+            "csrfProtection": false
+        },
+        {
+            "source": "^/basic/authentication/endpoint(/.*)",
+            "target": "$1",
+            "destination": "<destination-name>",
+            "authenticationType": "basic",
+            "csrfProtection": false
+        },
+        {
+            "source": "^/logout/callback",
+            "target": "/logout",
+            "destination": "<destination-name>",
+            "authenticationType": "none",
+            "csrfProtection": false
+        },
+        {
+            "source": "^(/.*)",
+            "target": "$1",
+            "destination": "<destination-name>",
+            "authenticationType": "none",
+            "csrfProtection": false
+        }
+    ],
+    "logout": {
+        "logoutEndpoint": "/logout",
+        "logoutPage": "/logout/callback"
+    }
+}
