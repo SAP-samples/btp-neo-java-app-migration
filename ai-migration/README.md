@@ -3,6 +3,8 @@
 A collection of AI agent skills for migrating SAP BTP Neo Java applications and subaccount configuration to Cloud Foundry, following the [Agent Skills](https://agentskills.io) open standard.
 
 > **Disclaimer:** The quality and accuracy of the migration results depend on the complexity of your application and the AI tool you use. Always review the generated output, test thoroughly, and expect to make manual adjustments — especially for complex authentication flows, custom configurations, and subaccount-level settings.
+>
+> **Important:** It is the sole responsibility of the customer to select an appropriate AI/LLM model and provider that meets their organizational, regulatory, and contractual requirements. Customers must ensure compliance with all applicable data protection regulations (including GDPR), industry-specific standards, and internal company policies before transmitting any data — including source code, configuration files, or personal data — to an AI service. SAP does not control and is not responsible for the data processing practices of third-party AI providers. Customers should evaluate whether their chosen model and provider offer adequate safeguards for data residency, confidentiality, and lawful processing.
 
 ---
 
