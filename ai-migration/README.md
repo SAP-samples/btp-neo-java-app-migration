@@ -152,6 +152,10 @@ Use the jakarta-java25-migration skill to upgrade to Java 25
 - **[destinations](skills/destinations/SKILL.md)** - Destination service for external connections
 - **[connectivity-onpremise](skills/connectivity-onpremise/SKILL.md)** - On-premise connectivity via Cloud Connector
 
+### 📦 Subaccount Migration Skills
+
+- **[neo-destinations-keystores-migrator](skills/neo-destinations-keystores-migrator/SKILL.md)** - End-to-end migration of destinations & keystores from Neo to CF
+
 ### 💾 Data Skills
 
 - **[persistence-hana](skills/persistence-hana/SKILL.md)** - HANA Cloud database binding
@@ -169,19 +173,15 @@ Use the jakarta-java25-migration skill to upgrade to Java 25
 
 - **[tomee-runtime](skills/tomee-runtime/SKILL.md)** - TomEE container for EJB applications
 
-### 📦 Subaccount Migration Skills
-
-- **[neo-destinations-keystores-migrator](skills/neo-destinations-keystores-migrator/SKILL.md)** - End-to-end migration of destinations & keystores from Neo to CF
-
 ## Plugin Structure
 
 ```
 .claude-plugin/
 ├── marketplace.json            # Marketplace manifest
-└── plugin.json                 # Plugin manifest
+├── plugin.json                 # Plugin manifest
 
 ai-migration/
-└── neo-java-migration-skills/
+├── neo-java-migration-skills/
     ├── skills/                 # All migration skills
     │   ├── approuter-setup/
     │   ├── authentication-xsuaa/
@@ -205,10 +205,10 @@ ai-migration/
     │   ├── subaccount-roles-import/
     │   ├── subaccount-trust-export/
     │   ├── subaccount-trust-import/
-    │   └── tomee-runtime/
+    │   ├── tomee-runtime/
     │
-    └── marketplace/
-        └── description.md
+    ├── marketplace/
+        ├── description.md
 ```
 
 ## Skill Discovery
