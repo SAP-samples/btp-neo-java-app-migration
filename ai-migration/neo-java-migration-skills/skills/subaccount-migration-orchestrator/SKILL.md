@@ -3,7 +3,8 @@ name: subaccount-migration-orchestrator
 description: >-
   Orchestrate complete Neo subaccount configuration migration to Cloud Foundry. Collects
   all required inputs upfront, then invokes the subaccount migration skills in sequence:
-  trust export/import, destinations export/import, and roles export/import. Produces a
+  trust export/import and roles export. Destinations and keystores migration is deferred
+  to neo-destinations-keystores-migrator (run after all CF apps are deployed). Produces a
   consolidated migration report. Use when you want a single command to migrate all
   platform-level configuration from a Neo subaccount to CF. Individual skills can also
   be invoked standalone for partial migrations.
@@ -20,12 +21,12 @@ Orchestrate complete Neo subaccount configuration migration to Cloud Foundry.
 This orchestrator collects all required inputs upfront, then invokes the subaccount migration skills in the correct sequence to migrate all platform-level configuration from a Neo subaccount to a CF subaccount:
 
 1. **Trust** — `subaccount-trust-export` → `subaccount-trust-import`
-2. **Destinations** — `subaccount-destinations-export` → `subaccount-destinations-import`
+2. **Destinations & Keystores** — `neo-destinations-keystores-migrator` (deferred — run after all CF apps are deployed)
 3. **Roles** — `subaccount-roles-export` → `subaccount-roles-import`
 
 After all skills complete, it produces a consolidated report summarizing results across all domains.
 
-> **Individual skills can be invoked standalone.** If you only need to migrate one domain (e.g., destinations only), invoke `subaccount-destinations-export` and `subaccount-destinations-import` directly — you do not need the orchestrator.
+> **Individual skills can be invoked standalone.** If you only need to migrate destinations and keystores, invoke `neo-destinations-keystores-migrator` directly — you do not need the orchestrator.
 
 > **What this orchestrator does NOT migrate:**
 > - Application source code (use `neo-to-cf-migration-orchestrator` for that)
@@ -137,26 +138,16 @@ Record results:
 
 If trust-import fails critically (BTP CLI unavailable, CF subaccount ID wrong), stop and report the error. Do not proceed to subsequent steps.
 
-## Step 2: Destinations Migration
+## Step 2: Destinations and Keystores Migration
 
-Inform the user:
-> "Step 2/3: Migrating destinations..."
+> **Deferred — run AFTER all apps are deployed to CF.**
+> App-level destinations and keystores are bound to specific CF app instances. If the CF apps do not exist yet, the migration script cannot create or bind the per-app Destination Service instances.
+>
+> After completing app code migration (`neo-to-cf-migration-orchestrator`) and deploying all apps (`cf deploy . -f`), invoke skill: **`neo-destinations-keystores-migrator`**
 
-## Step 2: Destinations Migration
+Record in the consolidated report that destinations and keystores migration is deferred. When `neo-destinations-keystores-migrator` is later run in post-deploy Phase 5, its summary output (uploaded/failed counts per account and per app) should be appended to the report manually.
 
-> **Note:** The `subaccount-destinations-export` and `subaccount-destinations-import` skills are not yet available. Destinations migration must be performed manually for now. Skip to Step 3.
-
-Record results:
-- Log: "Destinations migration: deferred — skills not yet available. Migrate destinations manually via BTP Cockpit → Connectivity → Destinations."
-
-
-After export completes, invoke skill: **`subaccount-destinations-import`**
-
-Record results:
-- Read `$MIGRATION_DIR/neo-destinations.json` — note destination count and types
-- Read `$MIGRATION_DIR/neo-destinations-import-report.json` — note uploaded/failed/manual steps
-
-If destinations-import fails, log the error in the consolidated report but **continue** to Step 3 — roles migration is independent.
+If destinations migration fails, log the error in the consolidated report but **continue** to Step 3 — roles migration is independent.
 
 ## Step 3: Roles Export
 
@@ -187,11 +178,7 @@ Read all individual reports and build a summary. Save to `$MIGRATION_DIR/subacco
     "reportFile": "<MIGRATION_DIR>/neo-trust-import-report.json"
   },
   "destinations": {
-    "status": "completed|failed|skipped",
-    "uploaded": 0,
-    "skipped": 0,
-    "failed": 0,
-    "reportFile": "<MIGRATION_DIR>/neo-destinations-import-report.json"
+    "status": "deferred — run neo-destinations-keystores-migrator after all apps are deployed"
   },
   "roles": {
     "exportStatus": "completed",
@@ -224,12 +211,8 @@ TRUST
   Third-party IdPs:    <count> [manual config required]
   Status: <completed|failed>
 
-DESTINATIONS
-  Uploaded:            <count>
-  Already configured:  <count>
-  Skipped (RFC):       <count>
-  Failed:              <count>
-  Status: <completed|failed>
+DESTINATIONS & KEYSTORES
+  ⚠ Deferred: run neo-destinations-keystores-migrator after all apps are deployed
 
 ROLES (export only — import deferred)
   Applications: <count>
@@ -255,14 +238,14 @@ ROLES:
 Full report: $MIGRATION_DIR/subaccount-migration-report.json
 Individual reports:
   Trust:        $MIGRATION_DIR/neo-trust-import-report.json
-  Destinations: $MIGRATION_DIR/neo-destinations-import-report.json
   Roles export: $MIGRATION_DIR/neo-roles.json
 
 NEXT STEPS:
   1. Complete all manual steps listed above
   2. Migrate application code: use neo-to-cf-migration-orchestrator for each app
   3. Deploy all apps to CF: cf deploy . -f (from each app directory)
-  4. Run subaccount-roles-import to assign role-templates and users
+  4. Run neo-destinations-keystores-migrator to migrate destinations and keystores
+  5. Run subaccount-roles-import to assign role-templates and users
 ```
 
 ## Configuration Files
@@ -274,8 +257,6 @@ NEXT STEPS:
 | `subaccount-migration-report.json` | `$MIGRATION_DIR` | Consolidated migration report |
 | `neo-trust-config.json` | `$MIGRATION_DIR` | Trust export output |
 | `neo-trust-import-report.json` | `$MIGRATION_DIR` | Trust import results |
-| `neo-destinations.json` | `$MIGRATION_DIR` | Destinations export output |
-| `neo-destinations-import-report.json` | `$MIGRATION_DIR` | Destinations import results |
 | `neo-roles.json` | `$MIGRATION_DIR` | Roles export output |
 | `neo-roles-import-report.json` | `$MIGRATION_DIR` | Roles import results |
 
@@ -283,7 +264,7 @@ NEXT STEPS:
 
 | Service | Plan | Purpose | Created by |
 |---------|------|---------|------------|
-| `destination` | `lite` | Subaccount-level destinations | `subaccount-destinations-import` |
+| `destination` | `lite` | Subaccount-level destinations | `neo-destinations-keystores-migrator` |
 
 ## Common Issues
 
@@ -301,7 +282,7 @@ NEXT STEPS:
 
 ### Issue: One step fails but others succeed
 **Cause:** Independent failures per domain (e.g., Destination Service not entitled but trust works fine).
-**Solution:** Fix the specific issue and re-invoke only the affected skill pair directly (e.g., `subaccount-destinations-import`). The orchestrator can also be re-run — idempotent operations will skip already-completed work.
+**Solution:** Fix the specific issue and re-invoke only the affected skill directly (e.g., `neo-destinations-keystores-migrator`). The orchestrator can also be re-run — idempotent operations will skip already-completed work.
 
 ## Next Steps
 

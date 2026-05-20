@@ -2,7 +2,7 @@
 
 ## Overview
 
-Comprehensive Claude Code plugin for migrating SAP BTP Neo Java applications to Cloud Foundry. Contains 22 modular, AI-powered migration skills that handle everything from Java 25/Jakarta EE upgrades to authentication, database connectivity, and service integration.
+Comprehensive Claude Code plugin for migrating SAP BTP Neo Java applications to Cloud Foundry. Contains 23 modular, AI-powered migration skills that handle everything from Java 25/Jakarta EE upgrades to authentication, database connectivity, and service integration.
 
 ## What's Included
 
@@ -40,7 +40,7 @@ Comprehensive Claude Code plugin for migrating SAP BTP Neo Java applications to 
 
 ## Key Features
 
-✅ **22 Modular Skills** - Use individually or orchestrated together
+✅ **23 Modular Skills** - Use individually or orchestrated together
 ✅ **Agent Skills Standard** - Follows agentskills.io specification
 ✅ **Progressive Disclosure** - Efficient context usage
 ✅ **Automatic Detection** - Identifies required services from code
