@@ -36,7 +36,7 @@ claude
 /skills
 ```
 
-You should see all 22 skills listed under the `sap-btp-neo-migration` plugin.
+You should see all 23 skills listed under the `sap-btp-neo-migration` plugin.
 
 #### Update
 
@@ -169,15 +169,19 @@ Use the jakarta-java25-migration skill to upgrade to Java 25
 
 - **[tomee-runtime](skills/tomee-runtime/SKILL.md)** - TomEE container for EJB applications
 
+### 📦 Subaccount Migration Skills
+
+- **[neo-destinations-keystores-migrator](skills/neo-destinations-keystores-migrator/SKILL.md)** - End-to-end migration of destinations & keystores from Neo to CF
+
 ## Plugin Structure
 
 ```
 .claude-plugin/
 ├── marketplace.json            # Marketplace manifest
-├── plugin.json                 # Plugin manifest
+└── plugin.json                 # Plugin manifest
 
 ai-migration/
-├── neo-java-migration-skills/
+└── neo-java-migration-skills/
     ├── skills/                 # All migration skills
     │   ├── approuter-setup/
     │   ├── authentication-xsuaa/
@@ -192,6 +196,7 @@ ai-migration/
     │   ├── mail-destinations/
     │   ├── monitoring-logging/
     │   ├── mta-descriptor/
+    │   ├── neo-destinations-keystores-migrator/
     │   ├── neo-to-cf-migration-orchestrator/
     │   ├── persistence-hana/
     │   ├── sdk-replacement/
@@ -200,15 +205,15 @@ ai-migration/
     │   ├── subaccount-roles-import/
     │   ├── subaccount-trust-export/
     │   ├── subaccount-trust-import/
-    │   ├── tomee-runtime/
+    │   └── tomee-runtime/
     │
-    ├── marketplace/
-        ├── description.md
+    └── marketplace/
+        └── description.md
 ```
 
 ## Skill Discovery
 
-Once installed, Claude Code automatically discovers all 22 skills via their SKILL.md frontmatter metadata. Skills can be invoked by:
+Once installed, Claude Code automatically discovers all 23 skills via their SKILL.md frontmatter metadata. Skills can be invoked by:
 
 - **Name**: "authentication-xsuaa"
 - **Keywords**: "XSUAA", "authentication", "OAuth"
