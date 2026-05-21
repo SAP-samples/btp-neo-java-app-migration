@@ -28,8 +28,8 @@ PHASE 0: Tooling setup — once
 
 PHASE 1: Subaccount export — once (read-only, Neo side)
   subaccount-trust-export
-  subaccount-destinations-export
   subaccount-roles-export              ← export now; import deferred to Phase 5
+  (destinations are NOT exported to file — migrated directly in Phase 3 via neo-destinations-keystores-migrator)
 
 PHASE 2: Per-app code migration — repeat for each app directory
   For each app:
@@ -41,14 +41,14 @@ PHASE 2: Per-app code migration — repeat for each app directory
 
 PHASE 3: Platform import — once (CF side, before deploy)
   subaccount-trust-import
-  subaccount-destinations-import
   (roles-import is NOT here — deferred)
 
 PHASE 4: Deploy all apps — once per app
   mvn clean package -DskipTests
   cf deploy . -f
 
-PHASE 5: Post-deploy roles import — once (after ALL apps deployed)
+PHASE 5: Post-deploy — once (after ALL apps deployed)
+  neo-destinations-keystores-migrator  ← requires CF apps to exist for app-level binding
   subaccount-roles-import              ← NOW: live XSUAA appIds exist
                                           assigns role-templates + users to collections
 ```
@@ -616,8 +616,8 @@ cf deploy . -f
 ```
 
 4. **Reminder for subaccount-level steps** (if not already completed):
-   - If subaccount platform migration has not been run: invoke `subaccount-migration-orchestrator` (trust + destinations + roles export) before deploying
-   - After all apps are deployed: run `subaccount-roles-import` to assign role-templates and users to the role collections created by `authentication-xsuaa`
+   - If subaccount platform migration has not been run: invoke `subaccount-migration-orchestrator` (trust + roles export) before deploying
+   - After all apps are deployed: run `neo-destinations-keystores-migrator` to migrate destinations and keystores, then run `subaccount-roles-import` to assign role-templates and users to the role collections created by `authentication-xsuaa`
    - See the **Full Subaccount Migration Order** section above for the complete multi-app sequence
 
 ## Common Issues
@@ -649,3 +649,4 @@ cf deploy . -f
 | tomee-runtime | TomEE container | EJB annotations |
 | monitoring-logging | Cloud Logging | Optional |
 | mta-descriptor | Deployment descriptor | Always required |
+| neo-destinations-keystores-migrator | Transfer subaccount-level and app-level destination configs and keystores from Neo to CF (platform data migration, not source code) | Subaccount-level, run in Phase 5 |

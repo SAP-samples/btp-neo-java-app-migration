@@ -36,7 +36,7 @@ claude
 /skills
 ```
 
-You should see all 22 skills listed under the `sap-btp-neo-migration` plugin.
+You should see all 23 skills listed under the `sap-btp-neo-migration` plugin.
 
 #### Update
 
@@ -152,6 +152,10 @@ Use the jakarta-java25-migration skill to upgrade to Java 25
 - **[destinations](skills/destinations/SKILL.md)** - Destination service for external connections
 - **[connectivity-onpremise](skills/connectivity-onpremise/SKILL.md)** - On-premise connectivity via Cloud Connector
 
+### 📦 Subaccount Migration Skills
+
+- **[neo-destinations-keystores-migrator](skills/neo-destinations-keystores-migrator/SKILL.md)** - End-to-end migration of destinations & keystores from Neo to CF
+
 ### 💾 Data Skills
 
 - **[persistence-hana](skills/persistence-hana/SKILL.md)** - HANA Cloud database binding
@@ -192,6 +196,7 @@ ai-migration/
     │   ├── mail-destinations/
     │   ├── monitoring-logging/
     │   ├── mta-descriptor/
+    │   ├── neo-destinations-keystores-migrator/
     │   ├── neo-to-cf-migration-orchestrator/
     │   ├── persistence-hana/
     │   ├── sdk-replacement/
@@ -208,7 +213,7 @@ ai-migration/
 
 ## Skill Discovery
 
-Once installed, Claude Code automatically discovers all 22 skills via their SKILL.md frontmatter metadata. Skills can be invoked by:
+Once installed, Claude Code automatically discovers all 23 skills via their SKILL.md frontmatter metadata. Skills can be invoked by:
 
 - **Name**: "authentication-xsuaa"
 - **Keywords**: "XSUAA", "authentication", "OAuth"
