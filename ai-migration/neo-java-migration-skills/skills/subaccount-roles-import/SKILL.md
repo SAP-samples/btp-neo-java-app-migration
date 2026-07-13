@@ -68,7 +68,17 @@ if [ -f .migration/cf-migration-config.json ]; then
 fi
 ```
 
-Read `cfSubaccountId` if present.
+Read `cfSubaccountId` if present and assign it to the shell variable:
+
+```bash
+CF_SUBACCOUNT_ID=$(python3 -c "
+import json, os
+path = '.migration/cf-migration-config.json'
+if os.path.exists(path):
+    with open(path) as f:
+        print(json.load(f).get('cfSubaccountId', ''))
+" 2>/dev/null || echo "")
+```
 
 **0b2. Read the trust import report to determine the IdP origin key:**
 
@@ -136,7 +146,8 @@ Build a map of `appName → appId` using jq:
 # For each app name from neo-roles.json, find its deployed appId
 # XSUAA appIds have the format: appname!tNNNNN
 # Match by the prefix before the '!' separator
-echo "$XSUAA_APPS" | jq -r '.[] | "\(.name) \(.appId)"'
+# NOTE: BTP CLI returns .appid (lowercase) and .xsappname — not .name or .appId
+echo "$XSUAA_APPS" | jq -r '.[] | "\(.xsappname) \(.appid)"'
 ```
 
 For each application in `neo-roles.json`:
@@ -144,7 +155,7 @@ For each application in `neo-roles.json`:
 ```bash
 APP_NAME="<appName from neo-roles.json>"
 APP_ID=$(echo "$XSUAA_APPS" | jq -r --arg name "$APP_NAME" \
-  '.[] | select(.name == $name or (.appId | startswith($name + "!"))) | .appId' | head -1)
+  '.[] | select(.xsappname == $name or (.appid | startswith($name + "!"))) | .appid' | head -1)
 ```
 
 **Classification:**
@@ -182,11 +193,10 @@ COLLECTION_NAME="${APP_NAME}-${ROLE_NAME}"
 **3b. Add the role-template to the collection:**
 
 ```bash
-btp add security/role \
-  --role-collection "${COLLECTION_NAME}" \
-  --role-name "${ROLE_NAME}" \
-  --app-id "${APP_ID}" \
-  --role-template "${ROLE_NAME}" \
+btp add security/role "${ROLE_NAME}" \
+  --to-role-collection "${COLLECTION_NAME}" \
+  --of-app "${APP_ID}" \
+  --of-role-template "${ROLE_NAME}" \
   --subaccount "${CF_SUBACCOUNT_ID}"
 ```
 
@@ -196,6 +206,7 @@ btp add security/role \
 |---------|--------|
 | Success (exit 0) | Mark as `role_assigned` |
 | "already exists" / conflict | Mark as `already_assigned` — treat as success |
+| "read-only RoleCollection" | Mark as `already_assigned` — role-template is already bound by `authentication-xsuaa` during deploy; no action needed |
 | Role collection not found | Add to manual checklist: "Role collection `{collectionName}` not found — ensure `authentication-xsuaa` was run for `{appName}` and the app is deployed. Create the collection manually or re-run `authentication-xsuaa`." |
 | Any other error | Mark as `failed`, capture error, continue |
 
@@ -253,11 +264,10 @@ btp assign security/role-collection "${GROUP_NAME}-Group" \
 For each entry in `group.roleAssignments[]`, CF role collections cannot contain other role collections. Each group→role link must be handled by adding the role-template from the referenced app to the group's collection:
 
 ```bash
-btp add security/role \
-  --role-collection "${GROUP_NAME}-Group" \
-  --role-name "${ROLE_NAME}" \
-  --app-id "${APP_ID}" \
-  --role-template "${ROLE_NAME}" \
+btp add security/role "${ROLE_NAME}" \
+  --to-role-collection "${GROUP_NAME}-Group" \
+  --of-app "${APP_ID}" \
+  --of-role-template "${ROLE_NAME}" \
   --subaccount "${CF_SUBACCOUNT_ID}"
 ```
 
@@ -375,7 +385,7 @@ List deployed XSUAA apps:
 
 ```bash
 btp --format json list security/app --subaccount <CF_SUBACCOUNT_ID> | \
-  jq '.[] | {name, appId}'
+  jq '.[] | {xsappname, appid}'
 ```
 
 ## Common Issues
@@ -402,7 +412,7 @@ btp --format json list security/app --subaccount <CF_SUBACCOUNT_ID> | \
 
 ### Issue: Role collections have wrong names
 **Cause:** The naming convention in `xs-security.json` differs from `{appName}-{roleName}`.
-**Solution:** Read the app's `xs-security.json` to find the exact role collection name, then use `btp add security/role --role-collection "<exact-name>" ...` manually.
+**Solution:** Read the app's `xs-security.json` to find the exact role collection name, then use `btp add security/role "<roleName>" --to-role-collection "<exact-name>" --of-app "<appId>" --of-role-template "<roleName>"` manually.
 
 ## Next Steps
 
