@@ -131,8 +131,8 @@ btp --format json list security/app --subaccount <id>
 ```json
 [
   {
-    "appId": "nonosgi-auth!t12345",
-    "name": "nonosgi-auth",
+    "appid": "nonosgi-auth!t12345",
+    "xsappname": "nonosgi-auth",
     "displayName": "nonosgi-auth",
     "description": "",
     "planName": "application"
@@ -143,7 +143,7 @@ btp --format json list security/app --subaccount <id>
 **jq to find appId by app name prefix:**
 ```bash
 btp --format json list security/app | \
-  jq -r '.[] | select(.name | startswith("nonosgi-auth")) | .appId'
+  jq -r '.[] | select(.xsappname | startswith("nonosgi-auth")) | .appid'
 ```
 
 ---
@@ -156,8 +156,8 @@ btp --format json get security/app "nonosgi-auth!t12345"
 
 ```json
 {
-  "appId": "nonosgi-auth!t12345",
-  "name": "nonosgi-auth",
+  "appid": "nonosgi-auth!t12345",
+  "xsappname": "nonosgi-auth",
   "scopes": [
     {
       "name": "$XSAPPNAME.Everyone",

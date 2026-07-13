@@ -220,21 +220,19 @@ btp update security/role-collection "<name>" \
 btp delete security/role-collection "<name>" [--subaccount <id>]
 
 # Adding roles to a role collection
-btp add security/role \
-  --role-collection "<rc-name>" \
-  --role-name "<role-name>" \
-  --app-id "<appid>" \
-  --role-template "<template-name>" \
+btp add security/role "<role-name>" \
+  --to-role-collection "<rc-name>" \
+  --of-app "<appid>" \
+  --of-role-template "<template-name>" \
   [--subaccount <id>]
-# Note: --app-id is the XSUAA xsappname!application suffix, e.g. "nonosgi-auth!t12345"
-# Get it from: btp --format json list security/app | jq '.[] | select(.name=="<appname>") | .appId'
+# Note: <appid> is the XSUAA xsappname!application suffix, e.g. "nonosgi-auth!t12345"
+# Get it from: btp --format json list security/app | jq '.[] | select(.xsappname=="<appname>") | .appid'
 
 # Removing roles from a role collection
-btp remove security/role \
-  --role-collection "<rc-name>" \
-  --role-name "<role-name>" \
-  --app-id "<appid>" \
-  --role-template "<template-name>" \
+btp remove security/role "<role-name>" \
+  --from-role-collection "<rc-name>" \
+  --of-app "<appid>" \
+  --of-role-template "<template-name>" \
   [--subaccount <id>]
 
 # Users
@@ -375,7 +373,7 @@ btp --format json list security/role-collection | jq '.[].name'
 
 # Get appId for a specific XSUAA app by display name
 btp --format json list security/app | \
-  jq '.[] | select(.name | startswith("nonosgi-auth")) | {name, appId}'
+  jq '.[] | select(.xsappname | startswith("nonosgi-auth")) | {xsappname, appid}'
 
 # List all role-templates available for an app
 btp --format json get security/app "<appid>" | \
@@ -439,7 +437,7 @@ After deploying an MTA with XSUAA, get the `appId` (needed for `btp add security
 
 ```bash
 # List all XSUAA apps — appId has the format "<xsappname>!t<number>"
-btp --format json list security/app | jq '.[] | {name, appId}'
+btp --format json list security/app | jq '.[] | {xsappname, appid}'
 ```
 
 ### Assigning Role-Templates to Role Collections After Deployment
@@ -449,17 +447,16 @@ Role collections created before XSUAA app deployment have no roles. After deploy
 ```bash
 # 1. Get the appId
 APP_ID=$(btp --format json list security/app | \
-  jq -r '.[] | select(.name | startswith("nonosgi-auth")) | .appId')
+  jq -r '.[] | select(.xsappname | startswith("nonosgi-auth")) | .appid')
 
 # 2. List available role-templates from the app
 btp --format json get security/app "$APP_ID" | jq '.roleTemplates[] | .name'
 
 # 3. Add each role-template to the appropriate role collection
-btp add security/role \
-  --role-collection "nonosgi-auth-Everyone" \
-  --role-name "Everyone" \
-  --app-id "$APP_ID" \
-  --role-template "Everyone"
+btp add security/role "Everyone" \
+  --to-role-collection "nonosgi-auth-Everyone" \
+  --of-app "$APP_ID" \
+  --of-role-template "Everyone"
 ```
 
 ### Creating Trust with IAS
@@ -558,7 +555,7 @@ btp --format json list services/instance | jq '.[] | {name, offering, plan, stat
 | Symptom | Cause | Solution |
 |---------|-------|---------|
 | `Authorization failed. Unknown session` | BTP CLI session expired | Run `btp login` (browser SSO) |
-| `btp add security/role` fails with "app not found" | Wrong `--app-id` format | Use full XSUAA appId (`xsappname!tXXXX`), get from `btp list security/app` |
+| `btp add security/role` fails with "app not found" | Wrong `--of-app` format | Use full XSUAA appId (`xsappname!tXXXX`), get from `btp --format json list security/app \| jq '.[] \| .appid'` |
 | `btp assign` with `--of-idp` fails | Wrong flag name | Use `--of-idp` (not `--origin`) for custom IdP users |
 | Role collection shows empty after `btp add security/role` | Race condition or targeting wrong subaccount | Verify with `btp get security/role-collection <name>`, check `--subaccount` param |
 | `btp create security/trust` fails | IAS tenant not yet connected | Use IAS tenant hostname (not GUID), verify IAS tenant exists |
