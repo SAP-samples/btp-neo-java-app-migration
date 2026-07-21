@@ -1,90 +1,81 @@
-package com.example.credstore.client;
+package com.sap.cloud.sample.credstore.client;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sap.cloud.sample.credstore.authentication.SSLContextProvider;
+import com.sap.cloud.sample.credstore.service.ServiceCredentials;
+import com.sap.cloud.sample.credstore.service.ServiceCredentialsAccessor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.net.ssl.SSLContext;
+import java.io.IOException;
 import java.net.HttpURLConnection;
-import java.net.URI;
+import java.net.URISyntaxException;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.security.GeneralSecurityException;
 
-/**
- * Client for SAP Credential Store using mTLS authentication
- */
 public class CredStoreClient {
+    private static final Logger logger = LoggerFactory.getLogger(CredStoreClient.class);
 
-    private static final ObjectMapper objectMapper = new ObjectMapper();
-    private static final String NAMESPACE_HEADER = "sapcp-credstore-namespace";
+    private static final String KEY = "key";
+    private static final String KEYS = "keys";
+    private static final String PASSWORD = "password";
+
+    private static final String CREDENTIALS_TYPE = "credentials";
+    private static final String CREDENTIAL_TYPE = "credential";
 
     private final HttpClient httpClient;
     private final String credentialStoreUrl;
+    private final SSLContextProvider sslContextProvider;
 
-    public CredStoreClient() throws Exception {
-        // Read service binding and set up SSL context
-        // Implementation simplified - see full code in skill documentation
-        this.credentialStoreUrl = "https://credstore-api.cfapps.sap.hana.ondemand.com";
-        this.httpClient = HttpClient.newBuilder()
-            .sslContext(SSLContext.getDefault())
-            .build();
+    public CredStoreClient() throws GeneralSecurityException, IOException {
+        ServiceCredentials credentials = new ServiceCredentialsAccessor().getCredentials();
+        credentialStoreUrl = credentials.getUrl();
+
+        sslContextProvider = new SSLContextProvider();
+        SSLContext sslContext = sslContextProvider.setupSSLContext(credentials);
+
+        httpClient = HttpClient.newBuilder()
+                .sslContext(sslContext)
+                .build();
     }
 
-    /**
-     * Retrieve a password by name
-     */
-    public String getPassword(String name, String namespace) throws Exception {
-        String url = String.format("%s/password?name=%s", credentialStoreUrl, name);
-        JsonNode response = sendRequest(url, namespace);
-        return response.path("value").asText();
+    public CredStoreResponse retrieveCredentials(String namespace) {
+        String requestUrl = String.format("%s/%s", credentialStoreUrl, KEYS);
+        return sendRequest(requestUrl, namespace, CREDENTIALS_TYPE);
     }
 
-    /**
-     * Retrieve a key (certificate/private key pair)
-     */
-    public KeyCredential getKey(String alias, String namespace) throws Exception {
-        String url = String.format("%s/key?name=%s", credentialStoreUrl, alias);
-        JsonNode response = sendRequest(url, namespace);
-
-        return new KeyCredential(
-            response.path("name").asText(),
-            response.path("value").asText(),
-            response.path("metadata").path("certificate").asText()
-        );
+    public CredStoreResponse retrieveCredential(String alias, String namespace) {
+        logger.info("Retrieving credential for alias: [{}] from namespace: [{}]", alias, namespace);
+        String requestUrl = String.format("%s/%s?name=%s", credentialStoreUrl, KEY, alias);
+        return sendRequest(requestUrl, namespace, CREDENTIAL_TYPE);
     }
 
-    private JsonNode sendRequest(String url, String namespace) throws Exception {
-        HttpRequest request = HttpRequest.newBuilder()
-            .uri(URI.create(url))
-            .header(NAMESPACE_HEADER, namespace)
-            .header("Accept", "application/json")
-            .GET()
-            .build();
+    public CredStoreResponse retrievePassword(String alias, String namespace) {
+        logger.info("Retrieving password for namespace: [{}]", namespace);
+        String requestUrl = String.format("%s/%s?name=%s", credentialStoreUrl, PASSWORD, alias);
+        return sendRequest(requestUrl, namespace, PASSWORD);
+    }
 
-        HttpResponse<String> response = httpClient.send(request,
-            HttpResponse.BodyHandlers.ofString());
+    private CredStoreResponse sendRequest(String requestUrl, String namespace, String type) {
+        try {
+            HttpRequest request = CredStoreRequestBuilder.buildRequest(requestUrl, namespace);
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
 
-        if (response.statusCode() != HttpURLConnection.HTTP_OK) {
-            throw new RuntimeException("Credential Store request failed: " +
-                response.statusCode());
+            if (response.statusCode() == HttpURLConnection.HTTP_OK) {
+                logger.info("Successfully retrieved {} for namespace: [{}]", type, namespace);
+                return new CredStoreResponse(true, "Successfully retrieved " + type);
+            } else {
+                logger.warn("Failed to retrieve {}. HTTP Status: {}, Response: {}", type, response.statusCode(), response.body());
+                return new CredStoreResponse(false, "Error retrieving " + type + ". HTTP Status: " + response.statusCode());
+            }
+        } catch (URISyntaxException | IOException | InterruptedException e) {
+            logger.error("Error retrieving {}: {}", type, e.getMessage(), e);
+            return new CredStoreResponse(false, "Failed to retrieve " + type + ". " + e.getMessage());
+        } finally {
+            sslContextProvider.destroyPrivateKey();
+            logger.debug("Destroyed private key after request.");
         }
-
-        return objectMapper.readTree(response.body());
-    }
-
-    public static class KeyCredential {
-        private final String name;
-        private final String encryptedPrivateKey;
-        private final String certificate;
-
-        public KeyCredential(String name, String encryptedPrivateKey, String certificate) {
-            this.name = name;
-            this.encryptedPrivateKey = encryptedPrivateKey;
-            this.certificate = certificate;
-        }
-
-        public String getName() { return name; }
-        public String getEncryptedPrivateKey() { return encryptedPrivateKey; }
-        public String getCertificate() { return certificate; }
     }
 }

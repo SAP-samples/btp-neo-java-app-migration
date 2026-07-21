@@ -1,6 +1,6 @@
 ---
 name: keystore-credstore
-description: Invoke this skill to migrate keystore and password storage to SAP Credential Store. Detects KeyStoreService or PasswordStorage resource-refs in web.xml. Replaces Neo keystore with Credential Store using mTLS authentication.
+description: Use this skill whenever migrating an SAP BTP Neo Java app that uses keystores, password storage, or any JNDI-bound credential lookup to Cloud Foundry. Triggers on `com.sap.cloud.crypto.keystore.api.KeyStoreService`, `com.sap.cloud.security.password.PasswordStorage`, `<resource-ref>` blocks for `KeyStoreService` or `PasswordStorage` in `web.xml`, `InitialContext.lookup("java:comp/env/KeyStoreService"|"PasswordStorage")`, or `@Resource(name = "KeyStoreService"|"PasswordStorage")`. Even if the user just says "migrate this app to CF" without naming credentials explicitly, invoke this skill the moment any of those symbols appear in the source. Replaces JNDI lookups with the SAP Credential Store REST API over mTLS, ships an offline-friendly Lombok-free Java client, and gives a Step 4 mtad with the JRE-version pin and existing-service binding the migration pipeline expects.
 disable-model-invocation: false
 allowed-tools: Read, Edit, Write, Bash, Grep, Glob
 ---
@@ -77,100 +77,251 @@ Also required:
 
 ### Step 2: Copy Client Classes
 
-Copy the following helper classes to your project from [assets/](assets/):
+Copy the following helper classes to your project from [assets/](assets/). Place them under
+`src/main/java/com/sap/cloud/sample/credstore/...` (the assets are flat in `assets/` but use
+`package com.sap.cloud.sample.credstore.service`/`.authentication`/`.client`, so route each file to
+the matching subpackage):
 
-1. `ServiceCredentialsAccessor.java` - Reads Credential Store service binding
-2. `SSLContextProvider.java` - Sets up mTLS authentication
-3. `CredStoreClient.java` - Credential Store REST API client
+| File | Target subpackage |
+|------|-------------------|
+| `ServiceCredentials.java` | `service` |
+| `ServiceCredentialsAccessor.java` | `service` |
+| `CertificateParser.java` | `authentication` |
+| `KeyParser.java` | `authentication` |
+| `SSLContextProvider.java` | `authentication` |
+| `CredStoreResponse.java` | `client` |
+| `CredStoreRequestBuilder.java` | `client` |
+| `CredStoreClient.java` | `client` |
 
 These classes handle:
-- Reading service credentials from VCAP_SERVICES
-- Parsing PEM certificates and private keys
-- Creating SSL context for mTLS
-- REST API calls to Credential Store
+- Reading service credentials from VCAP_SERVICES via `DefaultServiceBindingAccessor`
+- Parsing PEM certificates (X.509) and PKCS#1 private keys (BouncyCastle PEMParser)
+- Creating an `SSLContext` for mTLS (PKCS12 keystore in memory)
+- REST API calls to Credential Store using `java.net.http.HttpClient`
+
+The classes have no Lombok dependency — getters are written by hand so they build cleanly under JDK 25.
+
+#### Required Maven dependencies
+
+Add these to your application's `pom.xml`. The `cf-tomcat-bom` + `sdk-modules-bom` BOMs already
+manage versions for `scp-cf` (which transitively brings in `service-binding-api`, BouncyCastle,
+Apache HttpClient, Jackson, and SLF4J), so you only need the `scp-cf` dependency itself plus
+`jakarta.servlet-api` for the servlet:
+
+```xml
+<properties>
+    <!-- sap_java_buildpack_jakarta supports SapMachine 17, 21, and 25.
+         Always pin the runtime JRE explicitly via JBP_CONFIG_SAP_MACHINE_JRE in
+         mtad.yaml / manifest.yml, and make sure this compile target matches that
+         major version — a higher class file version yields
+         java.lang.UnsupportedClassVersionError at servlet load time (HTTP 500). -->
+    <maven.compiler.source>25</maven.compiler.source>
+    <maven.compiler.target>25</maven.compiler.target>
+
+    <cf-tomcat-bom-version>2.22.0</cf-tomcat-bom-version>
+    <sdk-modules-bom-version>5.14.0</sdk-modules-bom-version>
+    <jakarta.servlet-api.version>6.1.0</jakarta.servlet-api.version>
+</properties>
+
+<dependencyManagement>
+    <dependencies>
+        <dependency>
+            <groupId>com.sap.cloud.sjb.cf</groupId>
+            <artifactId>cf-tomcat-bom</artifactId>
+            <version>${cf-tomcat-bom-version}</version>
+            <type>pom</type>
+            <scope>import</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.sap.cloud.sdk</groupId>
+            <artifactId>sdk-modules-bom</artifactId>
+            <version>${sdk-modules-bom-version}</version>
+            <type>pom</type>
+            <scope>import</scope>
+        </dependency>
+    </dependencies>
+</dependencyManagement>
+
+<dependencies>
+    <dependency>
+        <groupId>com.sap.cloud.sdk.cloudplatform</groupId>
+        <artifactId>scp-cf</artifactId>
+    </dependency>
+    <dependency>
+        <groupId>jakarta.servlet</groupId>
+        <artifactId>jakarta.servlet-api</artifactId>
+        <version>${jakarta.servlet-api.version}</version>
+        <scope>provided</scope>
+    </dependency>
+</dependencies>
+```
+
+> **Pin the runtime JRE explicitly.** `sap_java_buildpack_jakarta` supports SapMachine
+> 17, 21, and 25. The buildpack's implicit JRE choice changes over time, so don't rely on
+> it — always pin the version in `mtad.yaml` (or `manifest.yml`) and keep the compile
+> target in `pom.xml` aligned with it. A class file newer than the runtime JRE causes
+> Tomcat to fail loading the servlet with
+> `java.lang.UnsupportedClassVersionError: ... class file version N.0, this version of the
+> Java Runtime only recognizes class file versions up to M.0` and every request returns
+> HTTP 500.
+>
+> For Java 25 (the recommended target for new migrations) add this to your module
+> `properties:` block in `mtad.yaml`:
+>
+> ```yaml
+> JBP_CONFIG_COMPONENTS: "jres: ['com.sap.xs.java.buildpack.jre.SAPMachineJRE']"
+> JBP_CONFIG_SAP_MACHINE_JRE: '{ version: 25.+ }'
+> ```
+>
+> Same form for any other supported major version — substitute `17.+` or `21.+`.
+> Build locally with a matching JDK (e.g. SapMachine 25 from https://sapmachine.io/).
+> The Lombok-free helper classes in `assets/` compile cleanly on any supported version.
 
 ### Step 3: Update Application Code
 
-**Before (Neo - KeyStore):**
+> **The HTTP URL contract changes — do NOT preserve the old Neo query parameters.**
+>
+> The Neo `KeyStoreServlet` was driven by params shaped around its JNDI API:
+> `?method=getKeyStore&keyStoreName=<file>&password=<password>`. None of those map
+> onto SAP Credential Store, which is namespace-scoped and addresses each credential
+> by alias. The migrated servlet **MUST** accept the new contract:
+>
+> | URL | Behaviour |
+> |-----|-----------|
+> | `GET /keystore?namespace=<ns>` | List all credentials in `<ns>` (calls `CredStoreClient.retrieveCredentials(ns)`) |
+> | `GET /keystore?namespace=<ns>&alias=<name>` | Retrieve a single credential by alias (calls `CredStoreClient.retrieveCredential(alias, ns)`) |
+> | `GET /keystore` (no `namespace`) | Reject with `400 Bad Request`, body `Namespace is required!` |
+>
+> A Neo password-storage app likewise drops to: `GET /?namespace=<ns>&alias=<name>`
+> calling `CredStoreClient.retrievePassword(alias, ns)`.
+>
+> Why this matters: do **NOT** carry over the `method=getKeyStore` /
+> `keyStoreName=` / `password=` validation block from the original Neo servlet.
+> Doing so makes the migrated app keep returning `400` for the actual contract a
+> credstore-aware caller will use, and silently breaks integration tests. Replace
+> the old guard with the namespace check shown below.
+
+**Before (Neo `KeyStoreServlet` — JNDI lookup, `method=…&keyStoreName=…&password=…`):**
 ```java
 import com.sap.cloud.crypto.keystore.api.KeyStoreService;
 import java.security.KeyStore;
+import javax.naming.InitialContext;
+import javax.servlet.http.*;
 
-@Resource(name = "KeyStoreService")
-private KeyStoreService keyStoreService;
-
-public void useKeyStore() {
-    KeyStore keyStore = keyStoreService.getKeyStore();
-    PrivateKey key = (PrivateKey) keyStore.getKey("my-alias", password);
-    Certificate cert = keyStore.getCertificate("my-alias");
+public class KeyStoreServlet extends HttpServlet {
+    protected void doGet(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
+        String method = request.getParameter("method");
+        if (method == null || !"getKeyStore".equals(method)) {
+            // Neo-shaped guard. DELETE THIS BLOCK in the migrated version —
+            // the new contract does not use a "method" parameter.
+            response.sendError(HttpServletResponse.SC_BAD_REQUEST, "method invalid");
+            return;
+        }
+        KeyStoreService svc = (KeyStoreService) new InitialContext().lookup("java:comp/env/KeyStoreService");
+        KeyStore keyStore = svc.getKeyStore(
+            request.getParameter("keyStoreName"),
+            request.getParameter("password").toCharArray());
+        // ... iterate keyStore.aliases() ...
+    }
 }
 ```
 
-**After (Cloud Foundry):**
+**After (Cloud Foundry — `?namespace=<ns>[&alias=<name>]`):**
 ```java
-import com.example.credstore.client.CredStoreClient;
+package com.sap.cloud.sample.keystore.servlet;
+
+import com.sap.cloud.sample.credstore.client.CredStoreClient;
+import com.sap.cloud.sample.credstore.client.CredStoreResponse;
+import jakarta.servlet.http.HttpServlet;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+
+import java.io.IOException;
+import java.io.PrintWriter;
+import java.security.GeneralSecurityException;
 
 public class KeyStoreServlet extends HttpServlet {
 
-    private static final String NAMESPACE = "my-app-namespace";
-    private CredStoreClient credStoreClient;
+    private static final String PARAM_ALIAS = "alias";
+    private static final String PARAM_NAMESPACE = "namespace";
+
+    private final CredStoreClient credStoreClient;
+
+    public KeyStoreServlet() throws GeneralSecurityException, IOException {
+        this.credStoreClient = new CredStoreClient();
+    }
 
     @Override
-    public void init() throws ServletException {
-        try {
-            credStoreClient = new CredStoreClient();
-        } catch (Exception e) {
-            throw new ServletException("Failed to initialize CredStore client", e);
+    protected void doGet(HttpServletRequest request, HttpServletResponse response) throws IOException {
+        String alias = request.getParameter(PARAM_ALIAS);
+        String namespace = request.getParameter(PARAM_NAMESPACE);
+
+        if (isBlank(namespace)) {
+            sendError(response, "Namespace is required!", HttpServletResponse.SC_BAD_REQUEST);
+            return;
+        }
+
+        CredStoreResponse credstoreResponse = isBlank(alias)
+                ? credStoreClient.retrieveCredentials(namespace)               // list all keys
+                : credStoreClient.retrieveCredential(alias, namespace);        // single key
+
+        if (credstoreResponse.isSuccess()) {
+            sendOk(response, isBlank(alias)
+                    ? "Successfully retrieved credentials."
+                    : "Successfully retrieved credential.");
+        } else {
+            sendError(response, credstoreResponse.getMessage(), HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
         }
     }
 
-    protected void doGet(HttpServletRequest request, HttpServletResponse response)
-            throws ServletException, IOException {
+    private static boolean isBlank(String s) { return s == null || s.isBlank(); }
 
-        String alias = request.getParameter("alias");
+    private static void sendOk(HttpServletResponse response, String body) throws IOException {
+        try (PrintWriter out = response.getWriter()) { out.println(body); }
+    }
 
-        try {
-            // Retrieve key from Credential Store
-            CredStoreClient.KeyCredential keyCredential =
-                credStoreClient.getKey(alias, NAMESPACE);
-
-            response.setContentType("application/json");
-            response.getWriter().printf(
-                "{\"name\": \"%s\", \"hasCertificate\": %b}",
-                keyCredential.getName(),
-                keyCredential.getCertificate() != null
-            );
-
-        } catch (Exception e) {
-            response.sendError(500, "Failed to retrieve key: " + e.getMessage());
-        }
+    private static void sendError(HttpServletResponse response, String body, int status) throws IOException {
+        response.setStatus(status);
+        try (PrintWriter out = response.getWriter()) { out.println(body); }
     }
 }
 ```
 
-**Before (Neo - Password Storage):**
+The corresponding `web.xml` must drop the `<resource-ref>` (Step 1) AND map the
+servlet at `/keystore` (or `/` for password apps) so the URL above resolves. Any
+Neo `ErrorUtil` helper that imported `javax.servlet.*` must be ported to
+`jakarta.servlet.*` or inlined as private helpers like above.
+
+**Before (Neo Password Storage — JNDI lookup, no namespace param):**
 ```java
 import com.sap.cloud.security.password.PasswordStorage;
 
 @Resource(name = "PasswordStorage")
 private PasswordStorage passwordStorage;
 
-public void usePassword() {
-    char[] password = passwordStorage.getPassword("my-password-alias");
-    // Use password...
-    Arrays.fill(password, '0'); // Clear password
+public void usePassword(HttpServletRequest request) throws Exception {
+    String alias = request.getParameter("alias");                     // alias only
+    char[] password = passwordStorage.getPassword(alias);
+    // ... use password ...
 }
 ```
 
-**After (Cloud Foundry):**
+**After (Cloud Foundry — `?namespace=<ns>&alias=<name>`):**
 ```java
-import com.example.credstore.client.CredStoreClient;
+@Override
+protected void doGet(HttpServletRequest request, HttpServletResponse response) throws IOException {
+    String alias = request.getParameter("alias");
+    String namespace = request.getParameter("namespace");      // NEW required param
 
-public void usePassword() {
-    CredStoreClient client = new CredStoreClient();
-    String password = client.getPassword("my-password-alias", "my-namespace");
-    // Use password...
-    // Note: String passwords cannot be securely cleared in Java
+    if (isBlank(alias) || isBlank(namespace)) {
+        response.getWriter().println("Alias and namespace must be provided as query parameters.");
+        return;
+    }
+
+    CredStoreResponse r = credStoreClient.retrievePassword(alias, namespace);
+    response.getWriter().println(r.isSuccess()
+            ? "Password retrieved successfully."
+            : "Failed to retrieve password.");
 }
 ```
 
@@ -188,40 +339,60 @@ modules:
     properties:
       ENABLE_SECURITY_JAVA_API_V2: true
       SET_LOGGING_LEVEL: 'ROOT: INFO'
+      # Pin SapMachine JRE 25 explicitly. The WAR is compiled to Java 25 (class file
+      # version 69); without these env vars the buildpack runs whichever JRE is the
+      # implicit default at deploy time (currently 21, class file 65), and Tomcat
+      # rejects the servlet with java.lang.UnsupportedClassVersionError. The compile
+      # target in pom.xml MUST equal the major version pinned here. Both env vars
+      # are required — the first activates SapMachineJRE, the second selects 25.
+      JBP_CONFIG_COMPONENTS: "jres: ['com.sap.xs.java.buildpack.jre.SAPMachineJRE']"
+      JBP_CONFIG_SAP_MACHINE_JRE: '{ version: 25.+ }'
     requires:
-      - name: ${app-name}-credstore
+      - name: credstore-service
 
 resources:
-  - name: ${app-name}-credstore
-    type: org.cloudfoundry.managed-service
-    parameters:
-      service: credstore
-      service-plan: standard
-      config:
-        authentication:
-          type: mtls
+  # Bind to a credstore service instance that already exists in the target space.
+  # SAP BTP enforces a quota of **1 standard credstore instance per space** — declaring
+  # this resource as `org.cloudfoundry.managed-service` (which would create a fresh one
+  # on every deploy) makes the broker reject the deploy with
+  #   "Quota is not sufficient for this request, up to 1 standard instance/s for space..."
+  # whenever an instance already exists.
+  #
+  # Provision the shared instance ONCE per space (manually via cockpit/CLI, or via a
+  # separate bootstrap MTA), then bind to it from every app/test deployment with
+  # `org.cloudfoundry.existing-service`. The resource's `name:` here MUST match the
+  # actual service-instance name in the space.
+  #
+  # If you genuinely need a private credstore per app and you have quota for it,
+  # switch back to org.cloudfoundry.managed-service with service: credstore,
+  # service-plan: standard, and config.authentication.type: mtls.
+  - name: credstore-service
+    type: org.cloudfoundry.existing-service
 ```
 
 ### Step 5: Create Credentials in Credential Store
 
-Using BTP Cockpit or Credential Store API:
+Using BTP Cockpit (Service Marketplace → Credential Store → Manage Instance) or
+the [Credential Store API](https://api.sap.com/package/CredentialStore/rest):
 
-#### Create Namespace
-1. Open Credential Store dashboard
-2. Create namespace: `my-app-namespace`
+1. **Create the namespace.** Pick a name that matches what your servlet expects.
+2. **Add credentials inside that namespace** — each addressed by an alias. Add a
+   `Password` (name + value) for password-storage migrations, or a `Key` (name +
+   PEM certificate + PEM private key) for keystore-API migrations.
 
-#### Add Password
-1. Select namespace
-2. Add Password:
-   - **Name:** `database-password`
-   - **Value:** `secret123`
-
-#### Add Key
-1. Select namespace
-2. Add Key:
-   - **Name:** `my-certificate`
-   - **Certificate:** (paste PEM certificate)
-   - **Private Key:** (paste PEM private key)
+> **For the integration tests in this repo to pass**, use the fixtures the tests
+> expect:
+>
+> | Migration scenario | Namespace | Alias |
+> |---|---|---|
+> | `storing-passwords` | `pass-storage-app` | password named `test` (any value) |
+> | `keystore-api`      | `keystore-app`     | key named `keystore-app-key` (any cert/key pair) |
+>
+> The validate-migration prompt and `KeystoreIntegrationTest` /
+> `PassStoreIntegrationTest` both hit these names verbatim. If your namespace or
+> alias differs, the deployed app will return `404 credential_not_found` from the
+> credstore broker (servlet status 200 with body `Failed to retrieve credential`)
+> and the tests will fail — even though the migration itself is correct.
 
 ## Configuration Files
 
@@ -237,41 +408,131 @@ No new configuration files required. Credentials are accessed via service bindin
 
 ### 1. Compile Check
 ```bash
-mvn clean compile
+mvn clean install
 ```
 
 ### 2. Verify Service Binding
 ```bash
 cf env ${app-name} | grep -A 20 "credstore"
-# Should show url, certificate, and key
+# Should show url, certificate, and key under VCAP_SERVICES.credstore[0].credentials
 ```
 
-### 3. Test Credential Access
+### 3. Verify the Container Picked Up JRE 25
 ```bash
-curl "https://${app-url}/keystore?alias=my-certificate"
+cf ssh ${app-name} -c 'cat app/META-INF/.sap_java_buildpack/sap_machine_jre/release | head -1'
+# Expected: JAVA_VERSION="25.0.x"
+# If you see 21.x or 17.x, the JBP_CONFIG_SAP_MACHINE_JRE env var from Step 4
+# wasn't set or wasn't picked up — the servlet will fail to load with
+# UnsupportedClassVersionError on the first request.
 ```
+
+### 4. Test Credential Access
+The migrated servlet uses the new namespace-scoped contract from Step 3.
+The URL must include `?namespace=…` — without it the servlet correctly returns 400.
+
+```bash
+# List all keys in a namespace (alias omitted)
+curl -i "https://${app-url}/keystore?namespace=my-app-namespace"
+#   → HTTP 200, body: "Successfully retrieved credentials."
+
+# Retrieve a specific key by alias
+curl -i "https://${app-url}/keystore?namespace=my-app-namespace&alias=my-certificate"
+#   → HTTP 200, body: "Successfully retrieved credential."
+
+# Missing namespace — sanity-check the validation
+curl -i "https://${app-url}/keystore"
+#   → HTTP 400, body: "Namespace is required!"
+```
+
+For password-storage apps: the URL is `?namespace=<ns>&alias=<password-name>`
+returning `Password retrieved successfully.` on 200.
 
 ## Common Issues
 
-### Issue: "Credential Store service not bound"
-**Cause:** Service not bound to application.
-**Solution:** Check mtad.yaml requires section.
+These are the failure modes we have actually hit in CI on this codebase. The cures
+are listed in roughly the order you would try them.
 
-### Issue: SSL handshake failure
-**Cause:** mTLS certificate parsing issue.
-**Solution:**
-1. Verify service binding has certificate and key
-2. Check PEM format is correct
+### `java.lang.UnsupportedClassVersionError: ... class file version 69.0, this version of the Java Runtime only recognizes class file versions up to 65.0`
 
-### Issue: 401 Unauthorized
-**Cause:** Invalid namespace or missing credential.
-**Solution:**
-1. Verify namespace exists in Credential Store
-2. Check credential name matches exactly
+**Symptom:** App deploys and starts, but every request hits HTTP 500 (first request)
+followed by 404 ("servlet marked unavailable"). The stack trace appears in
+`cf logs <app-name> --recent`.
 
-### Issue: "Key not found"
-**Cause:** Credential doesn't exist in namespace.
-**Solution:** Create the credential in Credential Store dashboard.
+**Cause:** The WAR is compiled to Java 25 (class file version 69) but the deployed
+container runs SapMachine 21 (class file 65). The buildpack's implicit JRE choice
+does not match `<maven.compiler.target>`.
+
+**Fix:** Add the two `JBP_CONFIG_*` env vars from Step 4 to the module's
+`properties:` block in `mtad.yaml`. The compile target in `pom.xml` MUST equal the
+major version in `JBP_CONFIG_SAP_MACHINE_JRE`. Re-deploy.
+
+Confirm at runtime with `cf ssh <app-name> -c 'cat app/META-INF/.sap_java_buildpack/sap_machine_jre/release | head -1'` — it should say `JAVA_VERSION="25.0.x"`.
+
+### `Service broker error ... Quota is not sufficient for this request, up to 1 standard instance/s for space`
+
+**Symptom:** Deploy fails during `Processing service "credstore-service"...`.
+
+**Cause:** Mtad declares the credstore as `org.cloudfoundry.managed-service`, which
+asks the broker to create a fresh instance. SAP BTP space quotas typically allow
+only 1 standard credstore per space, so every deploy after the first fails.
+
+**Fix:** Provision the shared instance once per space (manually or via a one-shot
+bootstrap MTA), then bind to it via `org.cloudfoundry.existing-service` as shown
+in Step 4. The resource's `name:` must match the actual service-instance name in
+the space.
+
+### `Error collecting system parameters: A higher version of your MTA is already deployed`
+
+**Symptom:** Deploy fails immediately after `Detected new MTA version`.
+
+**Cause:** Someone deployed the same MTA ID at a higher `version:` previously
+(often during local debugging). The MTA deployer rejects downgrades by default.
+
+**Fix (preferred):** Bump the `version:` in `mtad.yaml` above whatever's currently
+deployed (e.g. `0.0.1` → `1.0.0`).
+
+**Alternative:** Pass `--version-rule ALL` to `cf deploy`, but that's a one-off
+escape hatch — fix the version field for permanence.
+
+### `Error detaching services from MTA ... CF-ServiceInstanceNotFound: <name>-credstore` (4 retries, then `Process failed`)
+
+**Symptom:** App and bind both succeed; the deploy script then tries to detach an
+old service from the previous MTA manifest, retries 4×, and exits 1.
+
+**Cause:** A prior version of the MTA listed a service the current `mtad.yaml` no
+longer references (e.g. `pass-store-credstore`, `keystore-credstore`). The MTA's
+persisted manifest still remembers it and tries to "detach" it on every deploy.
+The orphan service is in `create failed` state, so the cleanup hangs.
+
+**Fix:** Run once per space, then re-deploy:
+```bash
+cf undeploy <mta-id> --delete-services -f
+```
+That clears both the persisted manifest and any orphan instances. The shared
+`credstore-service` you bind to via `existing-service` is owned by other MTAs and
+stays untouched.
+
+### SSL handshake failure during `CredStoreClient` init
+
+**Cause:** mTLS certificate or key parsing failed.
+
+**Fix:**
+1. Confirm the service binding actually has both `certificate` and `key` keys
+   (`cf env <app-name> | grep -A 20 credstore`).
+2. The `key` must be PEM-encoded PKCS#1 (begins `-----BEGIN RSA PRIVATE KEY-----`)
+   — the `KeyParser` in `assets/` only accepts PKCS#1. PKCS#8 (`-----BEGIN PRIVATE KEY-----`)
+   would need a converter; if you see this, regenerate the binding with
+   `authentication.type: mtls` (see Step 4) — the broker emits PKCS#1 by default.
+
+### `cannot find symbol: method getUrl()/getKey()/getCertificate()/getMessage()/isSuccess()`
+
+**Cause:** Lombok was added back to a class that was previously Lombok-free.
+Lombok versions older than ~1.18.36 produce no bytecode under JDK 25, so
+`@Getter`-annotated fields silently lose their accessor methods.
+
+**Fix:** Don't reintroduce Lombok in this skill's helper classes. The shipped
+versions in `assets/` write getters by hand for exactly this reason. If you must
+use Lombok elsewhere in the project, pin `>= 1.18.40`.
 
 ## Security Best Practices
 
