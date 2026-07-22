@@ -1,11 +1,16 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
   SAP BTP Cloud Foundry - Tomcat Application POM Template
-  
+
   Usage: Copy this template to your project root and customize:
-  1. Update groupId, artifactId, and version
-  2. Adjust SDK versions if needed
-  3. Add application-specific dependencies
+    1. Update groupId, artifactId, and version
+    2. Resolve SAP BOM versions BEFORE writing this template into a real
+       pom.xml — see Step 3 of the sdk-replacement skill, which shows a
+       one-line Maven Central lookup. Do NOT ship the RESOLVED_*
+       placeholders below as-is; replace them with the literal output of
+       that lookup. Hard-coded version numbers go stale and break the
+       BOM import.
+    3. Add application-specific dependencies
 -->
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
