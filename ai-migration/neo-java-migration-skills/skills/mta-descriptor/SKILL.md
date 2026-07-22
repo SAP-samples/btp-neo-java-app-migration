@@ -94,8 +94,12 @@ modules:
 
       buildpack: sap_java_buildpack_jakarta
     properties:
-      JBP_CONFIG_COMPONENTS: "jres: ['com.sap.xs.java.buildpack.jdk.SAPMachineJDK']"
-      JBP_CONFIG_SAP_MACHINE_JDK: "{ version: 25.+ }"
+      # Pin SapMachine JRE 25 explicitly. Always set this — never rely on the buildpack's
+      # implicit JRE choice, and keep maven.compiler.target in pom.xml at the same major
+      # version. Use SAPMachineJRE (bundled, offline) — NOT SAPMachineJDK (heavyweight,
+      # online-only).
+      JBP_CONFIG_COMPONENTS: "jres: ['com.sap.xs.java.buildpack.jre.SAPMachineJRE']"
+      JBP_CONFIG_SAP_MACHINE_JRE: "{ version: 25.+ }"
       TARGET_RUNTIME: tomcat
     build-parameters:
       builder: maven
@@ -159,8 +163,12 @@ modules:
       buildpack: sap_java_buildpack_jakarta
     properties:
       ENABLE_SECURITY_JAVA_API_V2: true
-      JBP_CONFIG_COMPONENTS: "jres: ['com.sap.xs.java.buildpack.jdk.SAPMachineJDK']"
-      JBP_CONFIG_SAP_MACHINE_JDK: "{ version: 25.+ }"
+      # Pin SapMachine JRE 25 explicitly. Always set this — never rely on the buildpack's
+      # implicit JRE choice, and keep maven.compiler.target in pom.xml at the same major
+      # version. Use SAPMachineJRE (bundled, offline) — NOT SAPMachineJDK (heavyweight,
+      # online-only).
+      JBP_CONFIG_COMPONENTS: "jres: ['com.sap.xs.java.buildpack.jre.SAPMachineJRE']"
+      JBP_CONFIG_SAP_MACHINE_JRE: "{ version: 25.+ }"
       TARGET_RUNTIME: tomcat
       SET_LOGGING_LEVEL: 'ROOT: INFO'
     provides:

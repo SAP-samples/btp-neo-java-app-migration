@@ -101,6 +101,24 @@ Save the paths to `.migration/cf-migration-config.json` (create or update the fi
 </properties>
 ```
 
+> **Pin the runtime JRE explicitly.** `sap_java_buildpack_jakarta` supports SapMachine
+> 17, 21, and 25, but its implicit JRE choice changes over time — never rely on it.
+> Always pin Java 25 in your `mtad.yaml` (or `manifest.yml`) so the runtime matches the
+> compile target you set above; otherwise Tomcat fails to load the servlet with
+> `java.lang.UnsupportedClassVersionError: ... class file version 69.0, this version of the
+> Java Runtime only recognizes class file versions up to N.0` and every request returns
+> HTTP 500. The deployed module **must** include:
+>
+> ```yaml
+> properties:
+>   JBP_CONFIG_COMPONENTS: "jres: ['com.sap.xs.java.buildpack.jre.SAPMachineJRE']"
+>   JBP_CONFIG_SAP_MACHINE_JRE: '{ version: 25.+ }'
+> ```
+>
+> The `mta-descriptor` skill's `mtad-base.yaml` template already sets these — keep them.
+> Rule of thumb: **`maven.compiler.target` must equal the major version in
+> `JBP_CONFIG_SAP_MACHINE_JRE`.**
+
 ### Step 2: Run OpenRewrite Migration
 
 Execute the OpenRewrite recipes to automatically migrate code:
