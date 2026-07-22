@@ -710,8 +710,6 @@ If a subagent reports `FAILED` or `PARTIAL`:
 
 > **Why `mvn test-compile` for #1:** test code with hand-written servlet mocks is a common failure point after the Jakarta migration. The skill's Step 9 handles it, but the orchestrator must verify both main and test compile cleanly before moving on.
 
-After each subagent returns SUCCESS, the orchestrator runs the verification command itself once more (cheap insurance) and updates `.migration/cf-migration-config.json` with `"foundation.<skill>": "done"`.
-
 The subagent's prompt includes the verification command — its returned report contains the verification output. **Trust the worker's report.** Do NOT re-run the same `mvn` build inline after a SUCCESS; that's a token-burning duplicate. The orchestrator only re-verifies if the report status is FAILED/PARTIAL or the verification output it contains is ambiguous.
 
 After SUCCESS, append one line to `.migration/orchestrator.log` and update `.migration/cf-migration-config.json` with `"foundation.<skill>": "done"`.
