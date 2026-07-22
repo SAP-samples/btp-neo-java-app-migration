@@ -126,14 +126,14 @@ Execute the OpenRewrite recipes to automatically migrate code:
 ```bash
 mvn -U org.openrewrite.maven:rewrite-maven-plugin:run \
     -Drewrite.recipeArtifactCoordinates=org.openrewrite.recipe:rewrite-migrate-java:RELEASE \
-    -Drewrite.activeRecipes=org.openrewrite.java.migrate.UpgradeToJava25 \
-    -Drewrite.activeRecipes=org.openrewrite.java.migrate.jakarta.JakartaEE10 \
+    -Drewrite.activeRecipes=org.openrewrite.java.migrate.UpgradeToJava25,org.openrewrite.java.migrate.jakarta.JakartaEE10 \
     -Drewrite.exportDatatables=true
 ```
 
 > **Note:**
 > - Make sure you have Java SE 25 and the latest Maven version installed
 > - The recipe artifact coordinates ensure the latest migration recipes are downloaded
+> - **`-Drewrite.activeRecipes` must be passed exactly once.** Maven turns each `-D` into a Java system property, and a property has only one value per key — passing two `-D rewrite.activeRecipes=...` flags silently keeps only the last one and the first recipe is dropped without a warning. Always pass a single comma-separated list. See [the OpenRewrite Maven plugin reference](https://docs.openrewrite.org/reference/rewrite-maven-plugin) for the canonical syntax.
 
 This command will:
 - Update Java language features to Java 25
