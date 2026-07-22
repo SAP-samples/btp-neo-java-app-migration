@@ -1,8 +1,5 @@
-package com.sap.cloud.sample.credstore.client;
+package com.example.document;
 
-import com.sap.cloud.sample.credstore.authentication.SSLContextProvider;
-import com.sap.cloud.sample.credstore.service.ServiceCredentials;
-import com.sap.cloud.sample.credstore.service.ServiceCredentialsAccessor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

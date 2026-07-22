@@ -1,4 +1,4 @@
-package com.sap.cloud.sample.mail.session;
+package com.example.document;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;

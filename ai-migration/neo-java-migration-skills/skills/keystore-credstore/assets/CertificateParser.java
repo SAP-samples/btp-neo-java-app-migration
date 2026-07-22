@@ -1,4 +1,4 @@
-package com.sap.cloud.sample.credstore.authentication;
+package com.example.document;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

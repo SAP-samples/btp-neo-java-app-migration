@@ -126,6 +126,10 @@ Add logstash encoder dependency to `pom.xml`:
 
 Create a logging utility:
 
+> **Note on the package**: `com.example.logging` (and `com.example.health` in Step 4) are placeholders.
+> Rename to your project's package (e.g. `com.acme.logging`, `com.acme.health`) when you create these
+> classes, and update the imports in calling code to match.
+
 ```java
 package com.example.logging;
 

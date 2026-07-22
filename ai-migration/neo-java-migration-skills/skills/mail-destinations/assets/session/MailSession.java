@@ -1,4 +1,4 @@
-package com.sap.cloud.sample.mail.session;
+package com.example.document;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

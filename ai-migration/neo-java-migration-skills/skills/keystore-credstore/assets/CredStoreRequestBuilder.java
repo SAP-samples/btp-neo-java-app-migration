@@ -1,4 +1,4 @@
-package com.sap.cloud.sample.credstore.client;
+package com.example.document;
 
 import java.net.URI;
 import java.net.URISyntaxException;

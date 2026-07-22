@@ -1,4 +1,4 @@
-package com.sap.cloud.sample.credstore.client;
+package com.example.document;
 
 public class CredStoreResponse {
     private final boolean success;

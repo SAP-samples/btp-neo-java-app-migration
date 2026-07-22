@@ -107,14 +107,17 @@ Copy the mail session helper classes from [assets/session/](assets/session/) to 
 - `OnPremiseSMTPTransport.java` - SMTP transport via Cloud Connector
 - `ConnectivitySocks5ProxySocket.java` - SOCKS5 proxy for on-premise connectivity
 
-Copy these to `src/main/java/com/yourpackage/mail/session/`.
+Copy these to `src/main/java/com/example/document/` (the assets all declare `package com.example.document;`).
+
+> **Note on the package**: `com.example.document` is a placeholder. Rename to your project's package
+> (e.g. `com.acme.mail`) when you copy the assets in, and update the imports below to match.
 
 **Alternative: Simple MailSessionFactory**
 
 For simpler scenarios (internet mail only), you can create a minimal `MailSessionFactory.java`:
 
 ```java
-package com.example.mail;
+package com.example.document;
 
 import com.sap.cloud.sdk.cloudplatform.connectivity.Destination;
 import com.sap.cloud.sdk.cloudplatform.connectivity.DestinationAccessor;
@@ -249,7 +252,7 @@ public class MailServlet extends HttpServlet {
 
 **After (Cloud Foundry):**
 ```java
-import com.example.mail.MailSessionFactory;
+import com.example.document.MailSessionFactory;
 import jakarta.mail.*;
 import jakarta.mail.internet.*;
 import jakarta.servlet.http.*;

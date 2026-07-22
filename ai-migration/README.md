@@ -36,7 +36,7 @@ claude
 /skills
 ```
 
-You should see all 23 skills listed under the `sap-btp-neo-migration` plugin.
+You should see every skill shipped by the `sap-btp-neo-migration` plugin listed.
 
 #### Update
 
@@ -213,7 +213,7 @@ ai-migration/
 
 ## Skill Discovery
 
-Once installed, Claude Code automatically discovers all 23 skills via their SKILL.md frontmatter metadata. Skills can be invoked by:
+Once installed, Claude Code automatically discovers every skill in the plugin via its SKILL.md frontmatter metadata. Skills can be invoked by:
 
 - **Name**: "authentication-xsuaa"
 - **Keywords**: "XSUAA", "authentication", "OAuth"

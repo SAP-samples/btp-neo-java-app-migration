@@ -77,21 +77,22 @@ Also required:
 
 ### Step 2: Copy Client Classes
 
-Copy the following helper classes to your project from [assets/](assets/). Place them under
-`src/main/java/com/sap/cloud/sample/credstore/...` (the assets are flat in `assets/` but use
-`package com.sap.cloud.sample.credstore.service`/`.authentication`/`.client`, so route each file to
-the matching subpackage):
+Copy the following helper classes to your project from [assets/](assets/). All assets declare
+`package com.example.document;`, so place them flat under `src/main/java/com/example/document/`:
 
-| File | Target subpackage |
-|------|-------------------|
-| `ServiceCredentials.java` | `service` |
-| `ServiceCredentialsAccessor.java` | `service` |
-| `CertificateParser.java` | `authentication` |
-| `KeyParser.java` | `authentication` |
-| `SSLContextProvider.java` | `authentication` |
-| `CredStoreResponse.java` | `client` |
-| `CredStoreRequestBuilder.java` | `client` |
-| `CredStoreClient.java` | `client` |
+> **Note on the package**: `com.example.document` is a placeholder. Rename to your project's package
+> (e.g. `com.acme.security`) when you copy the assets in, and update the imports below to match.
+
+| File |
+|------|
+| `ServiceCredentials.java` |
+| `ServiceCredentialsAccessor.java` |
+| `CertificateParser.java` |
+| `KeyParser.java` |
+| `SSLContextProvider.java` |
+| `CredStoreResponse.java` |
+| `CredStoreRequestBuilder.java` |
+| `CredStoreClient.java` |
 
 These classes handle:
 - Reading service credentials from VCAP_SERVICES via `DefaultServiceBindingAccessor`
@@ -229,10 +230,9 @@ public class KeyStoreServlet extends HttpServlet {
 
 **After (Cloud Foundry — `?namespace=<ns>[&alias=<name>]`):**
 ```java
-package com.sap.cloud.sample.keystore.servlet;
+package com.example.document;
 
-import com.sap.cloud.sample.credstore.client.CredStoreClient;
-import com.sap.cloud.sample.credstore.client.CredStoreResponse;
+// CredStoreClient and CredStoreResponse live in the same package — no import needed.
 import jakarta.servlet.http.HttpServlet;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
