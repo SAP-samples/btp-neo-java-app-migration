@@ -130,7 +130,7 @@ cf oauth-token
 - **`cf push` vs `cf deploy`** — `cf push` deploys a single app from a manifest.yml; `cf deploy` deploys an MTA (Multi-Target Application) from mtad.yaml using the MultiApps plugin.
 - **Stuck MTA operations** — check with `cf mta-ops`, abort with `cf deploy -i <operation-id> -a abort`.
 - **`cf restage` vs `cf restart`** — `cf restart` stops and starts without re-staging; `cf restage` re-runs the buildpack (needed after changing env vars that affect staging).
-- **WAR filename = Tomcat context path** — The SAP Java buildpack deploys `ROOT.war` at `/`, `myapp.war` at `/myapp`. Always use `ROOT.war`.
+- **WAR filename = Tomcat context path** — The SAP Java buildpack serves `ROOT.war` at `/`, `myapp.war` at `/myapp`. This skill's pom templates name the WAR after the project's `<artifactId>`, so a project with `<artifactId>connectivity</artifactId>` serves at `/connectivity`. `mtad.yaml`'s `path:` must match the actual filename Maven writes (see `mta-descriptor` → "WAR filename rule").
 - **`cf logs --recent`** — only shows the last ~1000 lines from the Loggregator buffer; for full logs use `cf logs <app> --recent` or stream with `cf logs <app>`.
 
 ---
@@ -987,9 +987,11 @@ cf routes | grep <APP_NAME>
 # Check logs for startup errors
 cf logs <APP_NAME> --recent
 
-# Confirm WAR filename (must be ROOT.war for root context path)
-# In mtad.yaml: path: target/ROOT.war
-# In pom.xml: <warName>ROOT</warName> in maven-war-plugin config
+# Confirm WAR filename agreement between pom.xml and mtad.yaml
+# - pom.xml ships <warName>${project.artifactId}</warName> by default
+# - mtad.yaml's path: must be `target/<artifactId>.war` written LITERALLY
+#   (cf deploy does not evaluate Maven property expressions)
+# - The app will serve at /<artifactId> — adjust caller URLs accordingly.
 ```
 
 ### Diagnosing a Staging Failure
@@ -1038,7 +1040,8 @@ cf scale <APP_NAME> -m 512M -f
 | `Routes quota exceeded` | Org quota has 0 routes | Assign CF Runtime in BTP Cockpit entitlements — see btp-cli-reference |
 | `Cannot bind service` | Service in different space | Service must be in same space or shared |
 | `Staging error: Cannot access defaults field of Properties` | maven-war-plugin 2.2 on Java 25 | Pin `maven-war-plugin` to `3.4.0` in pom.xml |
-| 404 on all routes after deployment | WAR deployed with non-root context path | Rename to `ROOT.war` — set `<warName>ROOT</warName>` in maven-war-plugin |
+| 404 on all routes after deployment | WAR deployed under `/<artifactId>` context path (the buildpack uses the WAR filename) | Update caller URLs (approuter routes, tests, frontend) to include the `/<artifactId>` prefix — this is the expected behavior with the skill's default pom. See `mta-descriptor` → "WAR filename rule". |
+| `Error building MTA Archive: file path target/X.war not found` | `mtad.yaml` `path:` doesn't match what Maven actually wrote (literal `${project.artifactId}` doesn't expand; or `ROOT.war` carried over from older template) | Read `<artifactId>` from pom.xml; write `path: target/<artifactId>.war` literally in mtad.yaml. |
 | `MultipleServiceBindingsException` at runtime | Same service type bound twice | Ensure only one binding per service type |
 | `cf mta-ops` shows stuck operation | Previous deploy didn't clean up | `cf deploy -i <op-id> -a abort` |
 | App restarts repeatedly | Memory limit too low | `cf scale <app> -m 1024M -f` |

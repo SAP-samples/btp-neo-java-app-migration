@@ -28,6 +28,45 @@ After all skills complete, it produces a consolidated report summarizing results
 
 > **Individual skills can be invoked standalone.** If you only need to migrate destinations and keystores, invoke `neo-destinations-keystores-migrator` directly — you do not need the orchestrator.
 
+## Orchestration Algorithm
+
+This orchestrator follows the same **Orchestrator-Worker pattern** as `neo-to-cf-migration-orchestrator`. Each export/import skill is dispatched to a `general-purpose` subagent so the orchestrator's context never holds the raw trust JSON, role JSON, or shell output from the underlying scripts.
+
+### Dispatch tool
+
+Every step (trust-export, trust-import, roles-export) is invoked via the `Agent` tool with `subagent_type: "general-purpose"`:
+
+```
+Agent(
+  subagent_type: "general-purpose",
+  description: "<step name>",
+  prompt: <step-specific prompt — see each step below>
+)
+```
+
+Inline-only work (collecting inputs, building the consolidated report from on-disk JSON files) stays in the orchestrator. The skills below produce JSON files under `$MIGRATION_DIR/`; the orchestrator reads only the small summary fields it needs (counts, status), not the full payloads.
+
+### Concurrency policy
+
+| Step | Mode | Why |
+|------|------|-----|
+| Step 0 input collection | Inline | User Q&A and config file writes — no large output. |
+| Step 1 trust export → import | Sequential | Import depends on export's output JSON. |
+| Step 3 roles export | Sequential (after Step 1) | Roles import is deferred to post-deploy and lives in `subaccount-roles-import`. |
+| Step 4 consolidated report | Inline | Read 2-3 small JSON files, render summary. |
+
+No fan-out is appropriate here — the steps form a short dependency chain.
+
+### Failure & retry policy
+
+### Failure & retry policy
+
+- **Max retries per step: 2.** After 2 failed subagent attempts on the same step, surface to the user.
+- **Trust import failure** → hard stop. Do not proceed to roles export.
+- **Roles export failure** → log and surface to user. Roles export runs only after trust import succeeds, but a roles-export failure does not affect trust (they are independent in failure handling).
+- **Token expiry mid-export** → re-spawn the subagent with the same prompt (export skills are idempotent; already-existing resources are treated as success).
+
+
 > **What this orchestrator does NOT migrate:**
 > - Application source code (use `neo-to-cf-migration-orchestrator` for that)
 > - Keystore and password data (requires cryptographic operations not supported via shell)
@@ -128,15 +167,81 @@ If either fails, stop and tell the user which CLI needs login.
 Inform the user:
 > "Step 1/3: Migrating trust configuration (IdP)..."
 
-Invoke skill: **`subaccount-trust-export`**
+### Step 1a: Dispatch trust export to a subagent
 
-After export completes, invoke skill: **`subaccount-trust-import`**
+Invoke the `Agent` tool:
 
-Record results:
-- Read `$MIGRATION_DIR/neo-trust-config.json` — note IdP count and types
-- Read `$MIGRATION_DIR/neo-trust-import-report.json` — note imported/failed/manual steps
+```
+Agent(
+  subagent_type: "general-purpose",
+  description: "subaccount trust export",
+  prompt: <prompt below>
+)
+```
 
-If trust-import fails critically (BTP CLI unavailable, CF subaccount ID wrong), stop and report the error. Do not proceed to subsequent steps.
+Prompt:
+
+```
+You are running the subaccount-trust-export skill of the Neo→CF subaccount migration.
+
+Migration directory (operate ONLY here for state files): <MIGRATION_DIR>
+Neo subaccount config: <MIGRATION_DIR>/neo-migration-config.json
+
+Your task:
+1. Invoke the subaccount-trust-export skill and follow it exactly.
+2. Write the export JSON to <MIGRATION_DIR>/neo-trust-config.json.
+3. Return a concise report (≤ 20 lines):
+   - Output file path
+   - IdP count (IAS / third-party split)
+   - Status: SUCCESS | FAILED | PARTIAL
+   - Any auth/token/network errors encountered
+
+Do NOT return the full trust JSON. The orchestrator reads it from disk if needed.
+Your final message IS the return value.
+```
+
+### Step 1b: Dispatch trust import to a subagent
+
+Only if Step 1a returned SUCCESS. Invoke:
+
+```
+Agent(
+  subagent_type: "general-purpose",
+  description: "subaccount trust import",
+  prompt: <prompt below>
+)
+```
+
+Prompt:
+
+```
+You are running the subaccount-trust-import skill.
+
+Migration directory: <MIGRATION_DIR>
+Trust export JSON (input): <MIGRATION_DIR>/neo-trust-config.json
+CF subaccount config: <MIGRATION_DIR>/cf-migration-config.json
+
+Your task:
+1. Invoke the subaccount-trust-import skill and follow it exactly.
+2. Write the import report to <MIGRATION_DIR>/neo-trust-import-report.json.
+3. Return a concise report (≤ 20 lines):
+   - Imported count, failed count, manual-steps count
+   - btp CLI errors if any
+   - Status: SUCCESS | FAILED | PARTIAL
+
+Your final message IS the return value.
+```
+
+### Step 1c: Read summary fields inline
+
+After the subagents return, the orchestrator reads only the small summary fields it needs:
+
+```bash
+jq '.idpCount, .iasCount, .thirdPartyCount' "$MIGRATION_DIR/neo-trust-config.json"
+jq '.imported, .failed, .manualSteps' "$MIGRATION_DIR/neo-trust-import-report.json"
+```
+
+If trust-import returned FAILED critically (BTP CLI unavailable, CF subaccount ID wrong), stop and report the error. Do not proceed to subsequent steps.
 
 ## Step 2: Destinations and Keystores Migration
 
@@ -154,10 +259,44 @@ If destinations migration fails, log the error in the consolidated report but **
 Inform the user:
 > "Step 3/3: Exporting application roles and groups..."
 
-Invoke skill: **`subaccount-roles-export`**
+### Step 3a: Dispatch roles export to a subagent
 
-Record results:
-- Read `$MIGRATION_DIR/neo-roles.json` — note role/group counts
+Invoke the `Agent` tool:
+
+```
+Agent(
+  subagent_type: "general-purpose",
+  description: "subaccount roles export",
+  prompt: <prompt below>
+)
+```
+
+Prompt:
+
+```
+You are running the subaccount-roles-export skill of the Neo→CF subaccount migration.
+
+Migration directory: <MIGRATION_DIR>
+Neo subaccount config: <MIGRATION_DIR>/neo-migration-config.json
+
+Your task:
+1. Invoke the subaccount-roles-export skill and follow it exactly.
+2. Write the export JSON to <MIGRATION_DIR>/neo-roles.json.
+3. Return a concise report (≤ 20 lines):
+   - Output file path
+   - totalApplications, totalRoles, totalGroups
+   - Status: SUCCESS | FAILED | PARTIAL
+   - Any auth/token/network errors encountered
+
+Do NOT return the full roles JSON. The orchestrator reads it from disk if needed.
+Your final message IS the return value.
+```
+
+### Step 3b: Read summary fields inline
+
+```bash
+jq '.totalApplications, .totalRoles, .totalGroups' "$MIGRATION_DIR/neo-roles.json"
+```
 
 > **Roles import is deferred.** `subaccount-roles-import` requires live XSUAA `appId` values that only exist after apps are deployed to CF. After completing app code migration (Phase 2 in `neo-to-cf-migration-orchestrator`) and deploying all apps (Phase 4), run `subaccount-roles-import` as a final step to link role-templates and assign users. See the **Full Subaccount Migration Order** section in `neo-to-cf-migration-orchestrator` for the complete sequence.
 

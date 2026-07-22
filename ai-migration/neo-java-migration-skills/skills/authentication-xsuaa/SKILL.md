@@ -235,7 +235,7 @@ modules:
   # Java Backend Application
   - name: ${app-name}
     type: java.tomcat
-    path: target/ROOT.war
+    path: target/<artifactId>.war   # substitute literal artifactId from pom.xml; app serves at /<artifactId>
     parameters:
       buildpack: sap_java_buildpack_jakarta
       disk-quota: 1024M
@@ -295,7 +295,7 @@ resources:
 ```
 
 > **Key points:**
-> - `path: target/ROOT.war` — WAR must be named ROOT so Tomcat serves at `/`. Configure `maven-war-plugin` with `<warName>ROOT</warName>`.
+> - `path: target/<artifactId>.war` — read the `<artifactId>` from `pom.xml` and substitute it literally (the pom assets ship `maven-war-plugin` with `<warName>${project.artifactId}</warName>`, so the WAR is named after the artifactId). The app will serve at `/<artifactId>` — approuter destinations and tests must use that prefix. See `mta-descriptor` → "WAR filename rule" for the full guidance.
 > - `ENABLE_SECURITY_JAVA_API_V2: true` — required for XSUAA JWT validation via the `java-api` library.
 > - `JBP_CONFIG_COMPONENTS` + `JBP_CONFIG_SAP_MACHINE_JDK` — pin to SAPMachineJDK 17.
 > - `provides` on the backend uses a custom property name (e.g. `neo-app-url`) and the approuter `requires` references it with `~{neo-app-url}`. The `url` shorthand only works if the `provides` block uses a property literally named `url`.
@@ -371,24 +371,11 @@ public class TokenDebugServlet extends HttpServlet {
 
 ### Issue: All requests return 404 after successful deployment
 
-**Cause:** WAR filename is not `ROOT.war`. The SAP Java buildpack deploys `auth.war` under the `/auth` context path. Requests to `/` or `/currentuser` return 404 because Tomcat only serves at `/auth/*`.
+**Cause:** The WAR is named `<artifactId>.war` (the default in this skill's pom templates), so the SAP Java buildpack serves it at the Tomcat context path `/<artifactId>` — not `/`. Requests to `/` or `/currentuser` return 404 because Tomcat only serves at `/<artifactId>/*`. This is the expected behavior, not a deployment bug.
 
-**Solution:** In `pom.xml`, set `<warName>ROOT</warName>` in the `maven-war-plugin` configuration:
+**Solution:** Update the caller — approuter routes (`xs-app.json`), integration tests, and any frontend code — to include the `/<artifactId>` prefix. For example, if the app's `<artifactId>` is `auth`, the deployed servlet at `/currentuser` is reachable at `/auth/currentuser`. The approuter destination's `url` should point at `~{neo-app-url}/auth` (or whatever the artifactId is).
 
-```xml
-<plugin>
-    <groupId>org.apache.maven.plugins</groupId>
-    <artifactId>maven-war-plugin</artifactId>
-    <version>3.4.0</version>
-    <configuration>
-        <warName>ROOT</warName>
-    </configuration>
-</plugin>
-```
-
-Update `mtad.yaml` `path:` to `target/ROOT.war`. Rebuild and redeploy.
-
-> **Note:** `<finalName>` in `<build>` does NOT control the WAR filename — only `<warName>` in the plugin configuration does.
+If you genuinely need the app to serve at `/` rather than `/<artifactId>` (e.g. legacy clients pin to root-relative paths and can't be updated), change the pom's `<warName>` to `ROOT` and the descriptor's `path:` to `target/ROOT.war` together — both must move in lockstep. The skill's defaults choose the artifactId-named WAR because it avoids the descriptor-vs-pom mismatch that breaks `cf deploy` outright; serving at `/<artifactId>` is the deliberate trade-off.
 
 ### Issue: CORS errors
 **Solution:** Add CORS configuration to approuter or backend:

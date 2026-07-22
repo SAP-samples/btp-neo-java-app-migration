@@ -101,21 +101,63 @@ Add to `<dependencyManagement>` section:
 </dependencyManagement>
 ```
 
-### Step 3: Add Version Properties
+### Step 3: Resolve and Add Version Properties
 
-Add to `<properties>` section:
+> **Do NOT write a version number from memory.** SAP BOM versions drift quickly,
+> and any literal you put here is *guaranteed* to be stale within months. The
+> reference scenarios in this repo and earlier drafts of this skill have
+> shipped numbers like `2.22.0` and `5.14.0` that no longer round-trip in the
+> SAP `build-snapshots` artifactory; the migration build dies with
+> `Non-resolvable import POM: ... cf-tomcat-bom:pom:<X> (absent)` followed by
+> a cascade of `'dependencies.dependency.version' is missing` errors for
+> every artifact the BOM was supposed to manage.
+>
+> Resolve the latest released version *now*, every time, before writing it
+> into `pom.xml`.
+
+Run a one-line lookup against Maven Central's public search API for each BOM
+the skill manages. It hits a stable, no-auth endpoint, sorts release versions
+(those with a hyphen-suffixed qualifier like `-RC` or `-SNAPSHOT` are filtered
+out by the regex), and prints exactly one line — the latest version string:
+
+```bash
+latest_version () {
+  curl -fsS --max-time 10 \
+    "https://search.maven.org/solrsearch/select?q=g:$1+AND+a:$2&core=gav&rows=20&wt=json" \
+  | jq -r '.response.docs | map(select(.v | test("^[0-9]+(\\.[0-9]+)*$")))
+                          | sort_by(-.timestamp) | .[0].v'
+}
+
+CF_TOMCAT_BOM_VERSION=$(latest_version com.sap.cloud.sjb.cf cf-tomcat-bom)
+SDK_MODULES_BOM_VERSION=$(latest_version com.sap.cloud.sdk    sdk-modules-bom)
+echo "Resolved: cf-tomcat-bom=${CF_TOMCAT_BOM_VERSION}, sdk-modules-bom=${SDK_MODULES_BOM_VERSION}"
+```
+
+If either lookup returns empty or `curl` exits non-zero (network issue,
+registry change), **stop**: report the error to the user. Do **not** fall
+back to a number from training data.
+
+Then write the resolved values into `<properties>` of the migrated `pom.xml`:
 
 ```xml
 <properties>
-    <!-- Latest stable versions as of 2025 -->
-    <cf-tomcat-bom-version>2.22.0</cf-tomcat-bom-version>
-    <sdk-modules-bom-version>5.14.0</sdk-modules-bom-version>
+    <!-- Both versions are resolved at migration time, not pinned. -->
+    <cf-tomcat-bom-version>RESOLVED_CF_TOMCAT_BOM_VERSION</cf-tomcat-bom-version>
+    <sdk-modules-bom-version>RESOLVED_SDK_MODULES_BOM_VERSION</sdk-modules-bom-version>
 </properties>
 ```
 
-> **Note:** Check for latest versions at:
-> - [cf-tomcat-bom on Maven Central](https://mvnrepository.com/artifact/com.sap.cloud.sjb.cf/cf-tomcat-bom)
-> - [sdk-modules-bom on Maven Central](https://mvnrepository.com/artifact/com.sap.cloud.sdk/sdk-modules-bom)
+Substitute the literal values from the lookup above for the two `RESOLVED_*`
+placeholders. After writing, sanity-check by running
+`mvn help:effective-pom -q -DforceStdout | head` — if the BOM imports cleanly
+the version is good.
+
+> **Source of truth:** the resolver queries
+> [search.maven.org](https://search.maven.org/) — the same registry as
+> [cf-tomcat-bom](https://mvnrepository.com/artifact/com.sap.cloud.sjb.cf/cf-tomcat-bom)
+> and [sdk-modules-bom](https://mvnrepository.com/artifact/com.sap.cloud.sdk/sdk-modules-bom)
+> on mvnrepository.com. If you need to confirm the result by eye, those URLs
+> are the canonical browser-friendly views.
 
 ### Step 4: Add SCP-CF and Security Dependencies
 
@@ -317,6 +359,22 @@ Replace Neo-specific imports with SAP Cloud SDK equivalents:
 ### Step 9: Complete pom.xml Example
 
 See [assets/pom-cf-tomcat.xml](assets/pom-cf-tomcat.xml) for a complete template.
+
+### Step 10: Build packaging — owned by `mta-descriptor`
+
+This skill is a **dependency-management** skill: it swaps Neo `pom.xml`
+dependencies for the CF BOM, SAP Cloud SDK modules BOM, and Cloud
+Security library. Build packaging — specifically the `maven-war-plugin`
+configuration that pins the WAR filename to `<artifactId>.war` — is a
+**deployment concern** and lives in the `mta-descriptor` skill, where
+the matching `path: target/<artifactId>.war` rule is documented.
+
+The shipped pom templates (`assets/pom-cf-tomcat.xml`) already include
+the correct `<build>` block. If you wrote `pom.xml` from scratch instead
+of copying the asset, **read `mta-descriptor`'s "Precondition —
+`pom.xml` MUST configure `maven-war-plugin`…" section before generating
+the descriptor.** That section has the required plugin block, the
+self-check, and the failure-mode explanation in one place.
 
 ## Configuration Files
 

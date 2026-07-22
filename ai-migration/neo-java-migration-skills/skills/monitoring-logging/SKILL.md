@@ -1,6 +1,6 @@
 ---
 name: monitoring-logging
-description: Invoke this skill to set up SAP Cloud Logging for application monitoring. Use when application needs centralized logging, custom metrics, or health checks. Replaces Neo built-in monitoring with Cloud Logging service.
+description: OPT-IN skill — invoke ONLY when the user explicitly asks for SAP Cloud Logging, OpenTelemetry tracing, custom metrics, or a centralized observability backend beyond CF's built-in stdout aggregator. Do NOT invoke based on the presence of slf4j, logback, log4j, or OpenTelemetry libraries in the source — those are present in nearly every Java app and a naive trigger would auto-provision a `cloud-logging standard` managed service, which is quota-limited per space and fails the deploy when the quota is exhausted (`Service broker cloud-logging failed with: Quota is not sufficient for this request`). The SAP Java buildpack already routes stdout/stderr to CF's log aggregator; this skill adds an additional managed service on top of that, which most apps do not need. When the user does ask, this skill replaces Neo's built-in monitoring dashboards with the Cloud Logging managed service and OTEL exporter configuration.
 disable-model-invocation: false
 allowed-tools: Read, Edit, Write, Bash, Grep, Glob
 ---

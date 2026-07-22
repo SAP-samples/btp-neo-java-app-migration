@@ -2,7 +2,7 @@
 name: neo-to-cf-migration-orchestrator
 description: Invoke this skill to orchestrate complete Neo to Cloud Foundry migration. Analyzes the Neo app, creates a migration plan, and dispatches each migration scenario (Jakarta, SDK, auth, persistence, destinations, etc.) to a separate subagent so the orchestrator's context stays lean across the full 5–14 step pipeline. Use when user says 'migrate Neo app', 'convert to CF', or 'Neo to Cloud Foundry migration'.
 disable-model-invocation: false
-allowed-tools: Task, Agent, Read, Edit, Write, Grep, Glob, Bash(curl *), Bash(python3 *), Bash(mvn *), Bash(btp *), Bash(cf *), Bash(echo *), Bash(cat *), Bash(ls *), Bash(mkdir *), Bash(find *), Bash(grep *)
+allowed-tools: Agent, Read, Edit, Write, Grep, Glob, Bash(curl *), Bash(python3 *), Bash(mvn *), Bash(btp *), Bash(cf *), Bash(echo *), Bash(cat *), Bash(ls *), Bash(mkdir *), Bash(find *), Bash(grep *)
 ---
 
 # Neo to Cloud Foundry Migration Orchestrator
@@ -18,29 +18,114 @@ This skill coordinates the end-to-end migration process by:
 4. Validating the migration at each step using cheap filesystem and `mvn` checks
 5. Generating the final deployment descriptor
 
-### Why subagents
+## Orchestration Algorithm
 
-Running each migration step inline would pull every child skill's `SKILL.md` (often hundreds of lines plus reference files) into the orchestrator's context. Across a full migration that's tens of thousands of tokens of skill bodies the orchestrator never needs to read — it only needs to know which skill to run next and whether the previous one succeeded. Each subagent handles one skill in a fresh context and returns a short status report; the orchestrator stays focused on planning, sequencing, verification, and recovery.
+This skill follows the **Orchestrator-Worker pattern** with a verification gate between steps:
 
-The same logic extends to every read- or build-heavy phase:
+- **Orchestrator** (this skill, running in your main context): plans, dispatches, verifies, and recovers. Holds only the plan, status log, and short worker reports.
+- **Workers** (subagents you spawn via the `Agent` tool): each handles one self-contained, idempotent unit of work in a fresh context and returns a ≤30-line structured report.
+- **Gate**: after each worker returns SUCCESS, the orchestrator advances to the next step. The worker's verification output is trusted — the orchestrator does NOT re-run the same verification.
+
+### Dispatch tool
+
+Every subagent in this skill is spawned via the `Agent` tool. Use `subagent_type: "general-purpose"` for migration steps and `subagent_type: "Explore"` for read-only detection fan-outs.
+
+```
+Agent(
+  subagent_type: "general-purpose",   // or "Explore" for read-only
+  description: "<3-5 word summary>",
+  prompt: <the full prompt below>
+)
+```
+
+Never emulate a subagent inline — that defeats the entire context-saving purpose.
+
+### Concurrency policy
+
+| Phase | Mode | Cap |
+|-------|------|-----|
+| Phase 1 detection | **Fan-out (parallel)** | Up to 13 Explore agents in one batch (one per skill detection). All read-only — no file conflicts. |
+| Phase 3 execution | **Sequential** | 1 at a time. Feature skills mutate overlapping files (`pom.xml`, `web.xml`, `mtad.yaml` precursors); parallel runs would race. Step 3.3 (`mta-descriptor`) is run **inline** by the orchestrator — see Step 3.3 for why this is the one exception to the per-skill subagent rule. |
+| Phase 4 verification | Sequential | 1 subagent. |
+
+When fanning out in Phase 1, issue all `Agent` calls in a single message so they run concurrently (barrier-sync pattern).
+
+### Failure & retry policy
+
+- **Max retries per step: 2.** After 2 failed subagent attempts on the same step, stop and surface to the user — do not loop indefinitely.
+- **Recoverable failures** (single-line tweak): fix in `$COPY_DIR` directly with `Edit`/`Write`, then re-run verification inline. Don't re-spawn a subagent for a one-line fix.
+- **Structural failures** (skill needs to re-run): re-spawn with the original prompt plus `Previous attempt failed because: <reason>. Address it and retry.`
+- **Hard stop conditions**: BOM version cannot be resolved from the registry; `mvn clean package` fails on a step that previously passed; `mtad.yaml` not produced in Phase 3.3 after 2 attempts.
+
+### orchestrator.log format
+
+Every dispatch outcome appends exactly one line to `.migration/orchestrator.log` in this canonical format:
+
+```
+<ISO-8601-timestamp> phase=<n> skill=<name> status=<SUCCESS|FAILED|PARTIAL> attempt=<k>
+```
+
+Append-only. Never edit prior lines. Both the Resume protocol below and Step 3.4's hygiene rules read and write this single format — do not introduce variants.
+
+### Resume protocol
+
+The orchestrator's own context may be summarized mid-migration. Resume is driven by `.migration/orchestrator.log` and `.migration/cf-migration-config.json`:
+
+```
+1. cat .migration/orchestrator.log
+
+2. last_success = last line whose status=SUCCESS
+   resume_from  = step immediately after last_success in the plan
+
+3. PARTIAL is treated as FAILED for resume purposes:
+   if the last line has status=PARTIAL or FAILED, the resume_from is THAT step
+   (re-dispatch it; child skills are idempotent so re-running is safe).
+
+4. If no log exists → start from Phase 0.
+   If log exists but plan absent → re-run Phase 1 + 2 (cheap, idempotent)
+                                  to rebuild the plan, then jump to resume_from.
+
+5. Honor the max-retry cap: count the existing FAILED+PARTIAL lines for the same
+   skill in the log; if already at 2, stop and surface to user instead of re-dispatching.
+```
+
+Each child skill is required to be idempotent (re-running on already-migrated files is a no-op or detects the migrated state). This means the worst case of a duplicate dispatch is a wasted subagent call, never a corrupted workspace.
+
+### Why subagents (motivation, kept for context)
+
+Running each migration step inline would pull every child skill's `SKILL.md` (often hundreds of lines plus reference files) into the orchestrator's context. Across a full migration that's tens of thousands of tokens of skill bodies the orchestrator never needs to read — it only needs to know which skill to run next and whether the previous one succeeded.
 
 | Phase | Inline or subagent? | Why |
 |-------|---------------------|-----|
 | Phase 0 — copy | Inline | Just `cp -r`, trivial. |
-| Phase 1 — analysis | **Subagent** | Runs ~13 detection sweeps across the whole repo; raw command output never needs to live in the orchestrator. The subagent returns the filled-in detection summary table only. |
-| Phase 2 — planning | Inline | The orchestrator already has the detection summary; it just renders the plan and asks the user. No new file reads. |
-| Phase 3 — execution | **One subagent per skill** | The original motivation — see the dispatch pattern below. |
-| Phase 4 — verification | **Subagent** | `mvn clean package` output, recursive grep, file listings. The subagent returns pass/fail + last 10 lines on failure. |
+| Phase 1 — analysis | **Fan-out: 13 parallel Explore subagents** | Each does one skill's detection in parallel; orchestrator aggregates the small structured reports inline. |
+| Phase 2 — planning | Inline | The orchestrator already has the aggregated detection results; it just renders the plan and asks the user. No new file reads. |
+| Phase 3 — execution (feature skills, Steps 3.1–3.2) | **One general-purpose subagent per skill, sequential** | The original motivation — see the dispatch pattern below. |
+| Phase 3 — execution (`mta-descriptor`, Step 3.3) | **Inline** in the orchestrator's context | One-shot, last step, and `mtad.yaml` is THE deliverable. The orchestrator already has the cross-skill rules and feature-skill list it needs to feed the descriptor; the subagent dispatch was a translation step that introduced drift. See Step 3.3. |
+| Phase 4 — verification | **One general-purpose subagent** | `mvn clean package` output, recursive grep, file listings. The subagent returns pass/fail + last 10 lines on failure. |
 
-Inline phases stay short and decision-shaped. Subagent phases stay self-contained: read whatever they need, return a small structured report.
-
-See the per-phase dispatch prompts in **Phase 1.0**, **Phase 3** (Step 3.1–3.3), and **Phase 4.0**.
+See the per-phase dispatch prompts in **Phase 1.0**, **Phase 3** (Step 3.1–3.2 for subagent feature skills; Step 3.3 runs inline), and **Phase 4.0**.
 
 ## Artifact versions — resolve, don't invent
 
 Never write an artifact version you remember from training data. SAP BOMs (`cf-tomcat-bom`, `sdk-modules-bom`, `cf-tomee-bom`, …) release frequently, and a number that doesn't exist in the registry breaks the BOM import with `Non-resolvable import POM`, which cascades into `'dependencies.dependency.version' is missing` for every dependency the BOM manages.
 
-When a child skill needs a version (most commonly `sdk-replacement` Step 3), the skill prescribes a lookup against the SAP Artifactory with Maven Central as a fallback. The subagent must run that lookup and write back the literal string the registry returns. If the lookup fails, the subagent must stop and report — do **not** ask another subagent to "just pick a recent one," and do not patch a version into the descriptor yourself.
+Resolve each SAP BOM with a one-line lookup against Maven Central — use this exact form, do not hand-pick a number:
+
+```bash
+latest_version () {
+  curl -fsS --max-time 10 \
+    "https://search.maven.org/solrsearch/select?q=g:$1+AND+a:$2&core=gav&rows=20&wt=json" \
+  | jq -r '.response.docs | map(select(.v | test("^[0-9]+(\\.[0-9]+)*$")))
+                          | sort_by(-.timestamp) | .[0].v'
+}
+
+latest_version com.sap.cloud.sjb.cf cf-tomcat-bom
+latest_version com.sap.cloud.sdk    sdk-modules-bom
+latest_version com.sap.cloud.sjb.cf cf-tomee-bom    # only if migrating to TomEE
+```
+
+Each invocation prints exactly one line: the latest *release* version. The subagent must capture that line and substitute it for the `RESOLVED_*` placeholders the child skills (`sdk-replacement`, `keystore-credstore`, `tomee-runtime`) ship in their pom snippets. If a lookup returns empty or `curl` exits non-zero — network failure, registry change — the subagent must stop and report. Do **not** ask another subagent to "just pick a recent one," do **not** fall back to a number from training data, and do **not** patch a version into the descriptor yourself.
 
 Other identifiers the skills prescribe — buildpack names (`sap_java_buildpack_jakarta`, not `sap_java_buildpack`), service names, plan names — are fixed strings, not version numbers. Use them exactly as the child skill specifies.
 
@@ -228,88 +313,105 @@ Save the paths to `.migration/cf-migration-config.json` (create or update):
 
 ## Phase 1: Analysis
 
-### Step 1.0: Dispatch Analysis to a Subagent
+### Step 1.0: Fan Out Detection to Parallel Explore Subagents
 
-Phase 1 runs ~13 detection sweeps over every `pom.xml`, `web.xml`, and Java source tree in the project. Streaming all that grep/find output through the orchestrator is exactly the context cost subagents are designed to avoid.
+Phase 1 runs ~13 detection sweeps over every `pom.xml`, `web.xml`, and Java source tree in the project. The sweeps are **independent and read-only** — perfect for fan-out. Each sweep goes to its own `Explore` subagent, all dispatched in a single message so they run concurrently (barrier-sync pattern). The orchestrator then aggregates the 13 short reports inline (cheap, decision-shaped).
 
-Spawn a `general-purpose` subagent with this prompt:
+#### Step 1.0a: First, discover the project layout once (inline)
 
-```
-You are running Phase 1 (Analysis) of the Neo→CF migration orchestrator skill.
+The fan-out workers need to know where `pom.xml`, `web.xml`, and Java sources live. Do this inline — it's three quick `find` calls, not worth a subagent:
 
-Working directory (operate ONLY here): <COPY_DIR>
-
-Read this skill's Phase 1 (Steps 1.1, 1.2, 1.3, 1.4) and execute it exactly.
-Run every detection command listed under Step 1.2 — do not skip any.
-Apply the cross-skill rules from Step 1.3.
-
-Return ONLY a structured Markdown report with these sections:
-
-## Project layout
-- flat | multi-module
-- pom.xml / web.xml / src/main/java locations
-- Current Java version (cite pom.xml:line)
-
-## Detection results
-For EACH skill in Step 1.2: `<skill>`: REQUIRED | NOT NEEDED — evidence (file:line or "empty").
-Cover all of: jakarta-java25-migration, sdk-replacement, dependency-compatibility,
-approuter-setup, authentication-xsuaa, persistence-hana, destinations,
-connectivity-onpremise, mail-destinations, document-management-sdm,
-keystore-credstore, tomee-runtime, monitoring-logging.
-
-## Cross-skill rules triggered (Step 1.3)
-One bullet per row that fires, with evidence.
-
-## Detection summary table
-Reproduce the Step 1.4 ASCII table with [x]/[ ] filled in.
-
-Hard limit: ≤ 250 lines. Cite as `path:line`. Do not paste file contents.
-Your final message IS the return value — no preamble.
+```bash
+find . -name "pom.xml" -type f -not -path "*/target/*"
+find . -name "web.xml" -path "*/WEB-INF/*" -type f
+find . -path "*/src/main/java" -type d
 ```
 
-The orchestrator keeps only this report. The raw grep/find output never enters its context. The subagent's report is what feeds Phase 2 planning.
+Note the layout: flat vs. multi-module, and which submodules contain Neo code. Pass this layout summary into every fan-out worker's prompt so they don't each re-discover it.
+
+#### Step 1.0b: Dispatch 13 parallel Explore subagents
+
+In a **single message**, issue 13 `Agent` tool calls (one per skill detection). All must use `subagent_type: "Explore"` and `description` of the form `"detect <skill>"`. The shared prompt template:
+
+```
+You are detecting whether the <SKILL_NAME> migration skill is needed for a Neo→CF migration.
+
+Working directory (read-only, operate ONLY here): <COPY_DIR>
+Project layout (already discovered): <flat | multi-module + submodule list>
+
+Run EXACTLY these detection commands and report what they find:
+
+<COPY THE COMMANDS FROM Step 1.2 FOR <SKILL_NAME> HERE>
+
+Return ONLY this single-line JSON object:
+{"skill": "<SKILL_NAME>", "required": true|false, "evidence": "<file:line or 'empty'>", "extras": {<see below>}}
+
+Decision rule: required=true if ANY command returned ANY output. required=false only
+if ALL commands returned empty. Matches in `neo/` submodules count as evidence.
+
+The "extras" field carries skill-specific evidence the orchestrator needs to evaluate
+the Step 1.3 cross-skill rules. Include only the keys relevant to this skill:
+
+- jakarta-java25-migration: {"hasApachePOI": true|false, "currentJavaVersion": "<n>"}
+- authentication-xsuaa: {"hasSAML": true|false, "hasBASIC": true|false,
+                         "neoAuthFilters": ["<filter1>", ...],
+                         "duplicateServletMappings": true|false}
+- mta-descriptor: {"buildpack": "sap_java_buildpack_jakarta"|"sap_java_buildpack"|null}
+- all other skills: {} (empty object)
+
+Hard limit: 1 line of JSON. No commentary. No file contents. No diffs.
+Your final message IS the return value.
+```
+
+Spawn one such Agent call for each of these 13 skills (the names match Step 1.2 headers exactly):
+`jakarta-java25-migration`, `sdk-replacement`, `dependency-compatibility`, `approuter-setup`, `authentication-xsuaa`, `persistence-hana`, `destinations`, `connectivity-onpremise`, `mail-destinations`, `document-management-sdm`, `keystore-credstore`, `tomee-runtime`, `monitoring-logging`.
+
+> `monitoring-logging` is dispatched only so the orchestrator's fan-out is uniform; its Step 1.2 body is a no-op (the rule is "OPT-IN, do not auto-detect" — see the catalog entry). The subagent returns empty, and Step 1.4 leaves the row at `[ ]`. Skip this skill in Phase 3 unless the user explicitly asked for Cloud Logging or OTEL.
+
+Concrete `Agent` tool invocation for one skill:
+
+```
+Agent(
+  subagent_type: "Explore",
+  description: "detect jakarta-java25-migration",
+  prompt: <the template above with <SKILL_NAME> = jakarta-java25-migration
+           and the matching Step 1.2 commands inlined>
+)
+```
+
+Repeat for the other 12 skills in the same message.
+
+#### Step 1.0c: Aggregate inline + apply cross-skill rules
+
+After the 13 workers return, aggregate inline:
+
+1. Collect the 13 JSON lines into a single map `{skill → {required, evidence}}`.
+2. Apply the Step 1.3 cross-skill rules table against the map and the project layout.
+3. Render the Step 1.4 ASCII detection summary, marking `[x]` for `required=true` and `[ ]` otherwise.
+
+This aggregation runs in the orchestrator's context, but only ~13 lines of JSON enter — not the raw grep output. The summary feeds Phase 2 planning directly.
+
+#### Failure inside the fan-out
+
+If an `Explore` agent fails (`null` return, non-JSON output, or worker error), re-spawn **just that one** with the same prompt — do not re-run the whole fan-out. Cap re-spawns at 2 per skill (consistent with the global max-retry policy). If a skill is still failing after 2 retries, mark its detection as `required=true, evidence="detection failed — assume needed"` and record the degradation in a separate `.migration/detection-warnings.log` file (plain text, one line per failed skill). **Do not write detection failures to `.migration/orchestrator.log`** — that log is reserved for Phase-3 execution outcomes and is the source of truth for the Resume protocol. Continue with the remaining skills — over-detection is safe (the corresponding migration step is idempotent on already-migrated code), under-detection is not.
 
 ### Step 1.1: Locate Project Files
 
-First, identify the project structure:
+The project layout (pom.xml, web.xml, Java source roots) was discovered inline in **Step 1.0a**. Reuse those results — do not re-run the `find` calls here.
 
-```bash
-# Find pom.xml (Maven project root)
-find . -name "pom.xml" -type f | head -5
+### Step 1.2: Detection Command Catalog (worker bodies)
 
-# Find web.xml
-find . -name "web.xml" -type f | head -5
+> **Who runs this:** the per-skill `Explore` subagents dispatched in **Step 1.0b** copy the relevant block from this section into their prompt and execute it. The orchestrator does **not** run any of these commands itself — that's the whole point of the fan-out. This section is the *catalog* the workers draw from.
 
-# Find Java source files
-find . -name "*.java" -type f | head -20
-```
+Each subsection below specifies the detection commands for one skill plus the rule for marking it required.
 
-### Step 1.2: Detect Required Skills
-
-Scan the application for detection patterns. For each skill, run the detection commands and check if its patterns are present.
-
-> **CRITICAL — Detection Rules:**
+> **CRITICAL — Detection Rules (these are baked into the worker prompt template in Step 1.0b):**
 > 1. If a detection command returns **ANY output at all**, the skill is **REQUIRED** — mark it `[x]`
 > 2. If **ALL** detection commands for a skill return **empty output**, the skill is **not needed** — mark it `[ ]`
 > 3. **Multi-module projects:** Many Neo apps have submodules (e.g., `neo/`, `cf/`, `common/`). A match in ANY submodule counts as detected. Do NOT discount matches found in `neo/` subdirectories — those are the Neo patterns that need migration.
 > 4. **Pre-existing CF code:** Some projects may already have partial CF implementations alongside Neo code. This does NOT suppress detection. If the Neo-side pattern exists, the skill must run to validate and complete the migration.
 
-#### Prerequisite: Discover Project Layout
-
-Multi-module projects may have web.xml and Java sources in non-standard paths. Run these first to discover the layout:
-
-```bash
-# Find all web.xml files (may be in submodules)
-find . -name "web.xml" -path "*/WEB-INF/*" -type f
-
-# Find all Java source roots
-find . -path "*/src/main/java" -type d
-
-# Find all pom.xml files (multi-module check)
-find . -name "pom.xml" -type f -not -path "*/target/*"
-```
-
-Store the discovered paths — all subsequent detection commands use `find`-based or project-root-relative (`./`) scans to handle both flat and multi-module layouts.
+> **Layout note:** all detection commands below use `find`- or project-root-relative (`./`) scans to handle both flat and multi-module layouts. The layout itself was already discovered in Step 1.0a — workers receive it as part of their prompt and do not re-discover.
 
 #### Check: jakarta-java25-migration (ALWAYS REQUIRED)
 ```bash
@@ -435,6 +537,22 @@ find . -name "pom.xml" -not -path "*/target/*" -exec grep -l -E "liquibase|flywa
 ```
 **Detection:** If ANY command above returns output -> REQUIRED. This skill resolves library-specific compatibility issues that fall outside the core jakarta-java25-migration.
 
+#### Check: monitoring-logging (OPT-IN — DO NOT AUTO-DETECT)
+```bash
+# This skill is OPT-IN ONLY. The worker MUST return empty output here.
+# Do not grep for slf4j / logback / log4j / OTEL / OpenTelemetry — those keywords
+# are present in essentially every Java app and a naive match would flag every
+# scenario as needing this skill, which provisions a `cloud-logging standard`
+# managed service. In SAP BTP that plan is quota-limited per space and every
+# additional unrequested instance fails the deploy with:
+#   "Service broker error: Service broker cloud-logging failed with: Quota is not sufficient for this request"
+# The buildpack already routes stdout/stderr to CF's built-in log aggregator,
+# so apps without an explicit Cloud Logging requirement deploy fine without
+# this skill.
+:   # no-op — intentionally produces no output
+```
+**Detection:** This command produces NO output by design. Mark this skill `[ ]` (not selected). The plan rendering step (Step 1.4) leaves it unchecked. Only flip it to `[x]` if the user **explicitly** asks for Cloud Logging, OpenTelemetry tracing, or centralized observability — and even then, prefer asking the user to confirm before provisioning, since the service has space-level quota implications.
+
 ### Step 1.3: Cross-Skill Technology Combination Rules
 
 After detection, check for these common technology combinations that require coordinated handling across skills. Apply the "Then Also Ensure" action during Phase 3 execution:
@@ -475,11 +593,16 @@ After scanning, create a summary. Mark `[x]` for every skill whose detection com
 | [?] document-management-sdm (check: EcmService found?)  |
 | [?] keystore-credstore (check: KeyStoreService found?)   |
 | [?] tomee-runtime (check: EJB annotations found?)        |
-| [ ] monitoring-logging (optional)                        |
+| [ ] monitoring-logging (OPT-IN — see note below)         |
 | [x] mta-descriptor *                                     |
 +---------------------------------------------------------+
 | Replace [?] with [x] if detection returned output,       |
 | or [ ] if detection returned nothing.                    |
+|                                                          |
+| monitoring-logging is the ONE exception: it stays [ ]    |
+| even if the model thinks logging keywords (slf4j,        |
+| logback, OTEL) appeared. Flip to [x] ONLY when the user  |
+| has explicitly asked for Cloud Logging / OpenTelemetry.  |
 +---------------------------------------------------------+
 ```
 
@@ -520,15 +643,27 @@ Present the plan to the user and ask for approval before proceeding.
 
 ## Phase 3: Execution
 
-### CRITICAL: Dispatch Each Skill to a Subagent
+### CRITICAL: Dispatch Each Feature Skill to a Subagent — EXCEPT `mta-descriptor`
 
-The migration plan covers 5–14 skills, each with hundreds of lines of instructions and reference material. If the orchestrator invokes them inline (loading each `SKILL.md` into its own context), it exhausts the context window before the migration is half done.
+The migration plan covers 5–14 skills, each with hundreds of lines of instructions and reference material. If the orchestrator invokes them all inline (loading each `SKILL.md` into its own context), it exhausts the context window before the migration is half done.
 
-**To stay context-efficient, dispatch each skill to a subagent via the `Agent` tool.** Each subagent gets a fresh context, reads only the one skill it needs, executes it against `$COPY_DIR`, and returns a short summary. The orchestrator keeps only the summary — not the skill body — and uses the saved `.migration/cf-migration-config.json` plus filesystem checks to track progress.
+**To stay context-efficient, dispatch each feature skill (Steps 3.1–3.2) to a subagent via the `Agent` tool.** Each subagent gets a fresh context, reads only the one skill it needs, executes it against `$COPY_DIR`, and returns a short summary. The orchestrator keeps only the summary — not the skill body — and uses the saved `.migration/cf-migration-config.json` plus filesystem checks to track progress.
+
+**Step 3.3 (`mta-descriptor`) is the one exception** — it runs INLINE in the orchestrator's context. `mtad.yaml` is the final deliverable, it must be byte-faithful to the cross-skill rules and the feature-skill list the orchestrator already holds, and we've seen subagent dispatch introduce drift here that breaks deploys. See Step 3.3 below.
 
 #### Subagent Dispatch Pattern
 
-For every skill in the plan, spawn a `general-purpose` subagent with a prompt of this shape:
+For every skill in the plan, invoke the `Agent` tool with `subagent_type: "general-purpose"`:
+
+```
+Agent(
+  subagent_type: "general-purpose",
+  description: "apply <skill-name>",
+  prompt: <the prompt below>
+)
+```
+
+Prompt template:
 
 ```
 You are migrating a SAP BTP Neo Java application to Cloud Foundry.
@@ -575,7 +710,9 @@ If a subagent reports `FAILED` or `PARTIAL`:
 
 > **Why `mvn test-compile` for #1:** test code with hand-written servlet mocks is a common failure point after the Jakarta migration. The skill's Step 9 handles it, but the orchestrator must verify both main and test compile cleanly before moving on.
 
-After each subagent returns SUCCESS, the orchestrator runs the verification command itself once more (cheap insurance) and updates `.migration/cf-migration-config.json` with `"foundation.<skill>": "done"`.
+The subagent's prompt includes the verification command — its returned report contains the verification output. **Trust the worker's report.** Do NOT re-run the same `mvn` build inline after a SUCCESS; that's a token-burning duplicate. The orchestrator only re-verifies if the report status is FAILED/PARTIAL or the verification output it contains is ambiguous.
+
+After SUCCESS, append one line to `.migration/orchestrator.log` and update `.migration/cf-migration-config.json` with `"foundation.<skill>": "done"`.
 
 ### Step 3.2: Dispatch Feature Skills
 
@@ -596,29 +733,48 @@ For each feature skill marked `[x]` in Step 1.4, dispatch a subagent in the orde
 
 When dispatching, **inject the relevant cross-skill rules from Step 1.3** into the subagent prompt's "Cross-skill rules to honor" line. For example, if Apache POI is present, the `jakarta-java25-migration` subagent's prompt must mention it; if SAML+BASIC auth is in `web.xml`, the `authentication-xsuaa` subagent's prompt must call out the standard-vs-extended approuter decision.
 
-### Step 3.3: Dispatch the Deployment Skill
+### Step 3.3: Generate the Deployment Descriptor (run INLINE — not a subagent)
 
 **MANDATORY — always last, always run, never skipped.**
 
-Dispatch a subagent for `mta-descriptor`:
+> **This step is the single exception to the "every skill goes to a subagent" rule.** The orchestrator runs `mta-descriptor` **directly in its own context**, not via the `Agent` tool. Three reasons:
+>
+> 1. **`mtad.yaml` is THE deliverable** of the entire migration. The orchestrator already knows which feature skills ran in Step 3.2 and the cross-skill rules from Step 1.3 — that context is needed verbatim by the descriptor generator. A subagent has to be told all of it through a prompt that's hard to keep faithful, and we've observed subagents improvising the descriptor when the prompt is too brief.
+> 2. **The skill body is needed for fidelity.** `mta-descriptor`'s rules (WAR filename must match `pom.xml`'s `<artifactId>`; SAPMachineJRE pin syntax; per-service `service:` / `service-plan:` values; credstore-service is always declared as `org.cloudfoundry.existing-service`) are precise and a subagent that doesn't load the SKILL.md will get them wrong.
+> 3. **Single occurrence in the pipeline.** Unlike feature skills (which can run for any of 8 different scenarios), `mta-descriptor` is loaded exactly once per migration. The context cost is bounded and worth paying directly.
+
+**How to run it inline:**
 
 ```
-... (standard subagent prompt) ...
-Skill to apply: mta-descriptor
-Detected context: <list every feature skill that ran in Step 3.2 — the descriptor must reference all their services>
-Verification: ls -la mtad.yaml && cat mtad.yaml | head -50
+1. Read the mta-descriptor SKILL.md fully:
+     Read ai-migration/neo-java-migration-skills/skills/mta-descriptor/SKILL.md
+   (Or use the path the host provides for skill assets.)
+
+2. Compile the inputs from prior phases:
+   - The plan's "feature skills that ran in Step 3.2" → determines which
+     services must be in the resources: block
+   - The cross-skill rules table from Step 1.3 (e.g.
+     `sap_java_buildpack_jakarta` → SAPMachineJRE pin syntax)
+   - The migrated `pom.xml`'s `<artifactId>` → goes into the module's
+     `path: target/<artifactId>.war`
+   - The keystore-credstore rule (if that skill ran): credstore is
+     org.cloudfoundry.existing-service named credstore-service
+
+3. Follow the mta-descriptor skill's instructions step by step IN THIS
+   context. Use Write/Edit to produce $COPY_DIR/mtad.yaml.
+
+4. Verify inline:
+   - Check the file exists: `ls -la $COPY_DIR/mtad.yaml`
+   - Confirm the module's path: line matches what Maven actually writes —
+     run `grep "Building war:" $COPY_DIR/build.log` and check that the
+     filename in mtad.yaml's path: matches.
+   - Confirm every service the feature skills emitted has a corresponding
+     resource and a matching requires: entry in the module.
 ```
 
-After the subagent returns, the orchestrator verifies the file landed:
+After the file is on disk, append a SUCCESS line to `.migration/orchestrator.log` (`phase=3 skill=mta-descriptor status=SUCCESS attempt=1`) and update `.migration/cf-migration-config.json` with `"deployment.mta-descriptor": "done"`.
 
-```bash
-if [ ! -f mtad.yaml ] && [ ! -f mta.yaml ]; then
-  echo "CRITICAL ERROR: mtad.yaml was not created. Re-dispatching mta-descriptor subagent."
-  # spawn a new subagent with: "Previous attempt failed: mtad.yaml not created. Generate it now."
-fi
-ls -la mtad.yaml
-cat mtad.yaml
-```
+**If mtad.yaml is missing or malformed after the inline run**, retry inline (re-read the skill, regenerate). Do not fall back to a subagent — the whole point of running this inline is that the orchestrator's context is the highest-fidelity place for this step. Max 2 retries (same cap as the global retry policy); after that, stop and surface the specific problem to the user with the file's current contents.
 
 > **CRITICAL:** The migration is incomplete without `mtad.yaml`. If this file is missing, the application cannot be deployed to Cloud Foundry. Never skip this step or consider the migration done without it.
 
@@ -626,9 +782,10 @@ cat mtad.yaml
 
 Between subagent dispatches, the orchestrator should:
 
-1. **Not** re-read files the subagent touched unless verification failed — trust the subagent's summary plus the cheap verification command.
-2. Keep its own running log to `.migration/orchestrator.log` (one line per skill: `<timestamp> <skill> <status>`) so it can recover if its own context is summarized mid-migration.
+1. **Not** re-read files the subagent touched unless its returned verification output indicates failure — trust the worker's report. Re-running the same `mvn` build inline after a SUCCESS is wasted tokens (see the "Concrete recommendations" / no-double-verification rule in the Orchestration Algorithm section).
+2. Append one line to `.migration/orchestrator.log` after every dispatch outcome, using the **canonical orchestrator.log format** defined at the top of this skill (Orchestration Algorithm → orchestrator.log format). Append-only — never edit prior lines. The Resume protocol reads this log to determine where to pick up after context summarization.
 3. Never load another skill's `SKILL.md` directly — that's the subagent's job. The orchestrator only knows the *plan*; the subagents know the *how*.
+4. Update `.migration/cf-migration-config.json` after each SUCCESS with `"phase3.<skill>": "done"` so the resume protocol has a structured snapshot in addition to the log.
 
 ## Phase 4: Verification
 
@@ -636,7 +793,17 @@ Between subagent dispatches, the orchestrator should:
 
 Final verification runs `mvn clean package` (long output), a recursive grep for stray Neo imports, and a structural file check. None of that output needs to live in the orchestrator unless something fails.
 
-Spawn a `general-purpose` subagent with this prompt:
+Invoke the `Agent` tool with `subagent_type: "general-purpose"`:
+
+```
+Agent(
+  subagent_type: "general-purpose",
+  description: "verify migration",
+  prompt: <the prompt below>
+)
+```
+
+Prompt:
 
 ```
 You are running Phase 4 (Verification) of the Neo→CF migration orchestrator skill.
@@ -725,6 +892,78 @@ cat mtad.yaml
 ls -la mtad.yaml xs-security.json approuter/ 2>/dev/null
 ```
 
+### Step 4.5: Lint `mtad.yaml` for HANA resource-level parameter pollution
+
+A `type: com.sap.xs.hana-schema` resource has NO supported parameters at
+the resource level — the reference scenarios use only `name` + `type`
+(two lines). Anything else gets either rejected outright or silently
+dropped:
+
+- `service: hana` / `service-plan: hdi-shared` (the classic managed-service
+  keys on the wrong type) → deploy hard-fails with:
+  > `CF-UnprocessableEntity(10008): Invalid service plan. ... Ensure that
+  > the service plan is visible in your current space ...`
+
+- `schema-name:` → deploy continues (warning only) but the parameter is
+  silently dropped, producing this noise in the deploy log:
+  > `Parameter(s) "{<name>-hana=[schema-name]}" are not supported in the
+  > specified scope, or referenced by any other entities. These
+  > parameters are not processed and will be lost after the operation
+  > completes.`
+
+Subagents dispatched for `persistence-hana` or `tomee-runtime`, and the
+orchestrator's own inline Step 3.3 (`mta-descriptor`), are the most common
+offenders. The orchestrator must catch all three before declaring the
+migration done.
+
+```bash
+# Flag any com.sap.xs.hana-schema block that has parameter-level keys
+# (none are supported at the resource level — the deployer drops them).
+python3 - <<'PY'
+import re, sys, pathlib
+p = pathlib.Path('mtad.yaml') if pathlib.Path('mtad.yaml').exists() else pathlib.Path('mta.yaml')
+if not p.exists():
+    sys.exit(0)
+text = p.read_text()
+# split into resource blocks at `- name:` boundaries
+blocks = re.split(r'(?m)^(?=\s*-\s+name:)', text)
+bad = []
+for b in blocks:
+    if 'com.sap.xs.hana-schema' not in b:
+        continue
+    for ln in b.splitlines():
+        s = ln.strip()
+        # The two classic anti-patterns (managed-service keys on hana-schema):
+        if s.startswith('service:') and 'hana' in s:
+            bad.append(ln.rstrip())
+        elif s.startswith('service-plan:') and 'hdi-shared' in s:
+            bad.append(ln.rstrip())
+        # schema-name on the resource is also unsupported — MTA emits
+        # `Parameter(s) "{<name>-hana=[schema-name]}" are not supported in
+        # the specified scope ... will be lost after the operation completes`
+        elif s.startswith('schema-name:'):
+            bad.append(ln.rstrip())
+if bad:
+    print('HANA hana-schema resource has forbidden keys — strip these:')
+    for ln in bad:
+        print('  ', ln)
+    sys.exit(1)
+print('HANA resource: clean (no service:/service-plan:/schema-name: at resource level)')
+PY
+```
+
+If the script exits non-zero, dispatch a fix subagent with prompt:
+
+> In `mtad.yaml`, every resource with `type: com.sap.xs.hana-schema` must
+> have NO `parameters:` block and NO `properties:` block at all. The
+> reference scenarios use only `name` + `type` (two lines). Strip
+> everything else inside the resource entry — `service: hana`,
+> `service-plan: hdi-shared`, `schema-name:`, `hdi-service-name:`, any
+> other keys. MTA's `com.sap.xs.hana-schema` resource type doesn't
+> support resource-level parameters; the deployer drops them with the
+> "not supported in the specified scope" warning. Re-run the lint and
+> confirm clean.
+
 ## Output
 
 At the end of migration, provide:
@@ -759,6 +998,38 @@ cf deploy . -f
 
 ### Issue: mtad.yaml missing required services
 **Solution:** Re-run mta-descriptor skill after all feature skills are complete.
+
+### Issue: Deploy fails immediately with `Error building MTA Archive: file path … not found`
+**Symptom:** Step 3.3's deploy exits non-zero within seconds, before any service is touched:
+
+> `FAILED`
+> `Error retrieving MTA: Error building MTA Archive:`
+> `file path scenarios/<scenario>/cf-ai-migrated/target/<X>.war not found`
+
+The earlier `mvn clean package -DskipTests` step succeeded; its
+`[INFO] Building war:` line shows a different filename than the
+descriptor's `path:`.
+
+**Cause:** `mtad.yaml`'s `path:` doesn't match what Maven writes. Either
+the descriptor literally contains `target/${project.artifactId}.war`
+(Maven property expressions are NOT evaluated by `cf deploy`), or it
+hard-codes `target/ROOT.war` while the migrated `pom.xml` is configured
+with `<warName>${project.artifactId}</warName>` (the current default in
+this skill's pom templates).
+
+**Fix:** Dispatch a fix subagent with:
+
+> Read the `<artifactId>` value from `pom.xml`. Edit `mtad.yaml` so the
+> Java backend module's `path:` is `target/<artifactId>.war` with the
+> artifactId substituted literally — NOT `${project.artifactId}` and
+> NOT `ROOT`. For example, if `pom.xml`'s artifactId is `connectivity`,
+> write `path: target/connectivity.war`. Do not modify `pom.xml`. After
+> the edit, re-run `cf deploy`.
+
+This is the descriptor-follows-pom convention used throughout the
+skills. Side effect: the app serves at `/<artifactId>` rather than `/`,
+so integration tests and approuter destinations must include the
+`/<artifactId>` URL prefix.
 
 ## Skill Reference
 
