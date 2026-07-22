@@ -11,6 +11,7 @@ import org.apache.chemistry.opencmis.commons.exceptions.CmisObjectNotFoundExcept
 import org.apache.http.HttpHeaders;
 import org.apache.http.HttpResponse;
 import org.apache.http.HttpStatus;
+import org.apache.http.client.methods.HttpDelete;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.entity.ContentType;
@@ -32,11 +33,28 @@ import java.util.stream.Collectors;
 /**
  * Client for SAP Document Management Service (SDM) using CMIS protocol.
  *
- * Important notes about SDM's CMIS browser binding:
- * - The CMIS repositoryId is the repository NAME (not the cmisRepositoryId field from the REST API)
- * - The browser binding URL is {ecmServiceUrl}/browser
- * - Repository creation uses the REST API v2 at {ecmServiceUrl}/rest/v2/repositories/
- * - The REST API returns repoAndConnectionInfos as a single object (not array) when there is only one repository
+ * SDM identifier rules — the two endpoints take DIFFERENT identifiers:
+ *
+ * - CMIS browser binding (`SessionParameter.REPOSITORY_ID`): uses the repository NAME.
+ *   The REST response has a `cmisRepositoryId` field, but that is the root folder ID, not
+ *   the CMIS repository id. Verify by hitting `GET {ecmServiceUrl}/browser` — the response
+ *   is a map keyed by repository names.
+ *
+ * - REST DELETE (`DELETE /rest/v2/repositories/{X}`): uses the SDM internal UUID — the `id`
+ *   field returned by `GET /rest/v2/repositories/` (e.g. `f3023e03-81da-4be4-...`).
+ *   Passing the repository name in this path produces HTTP 500 with body
+ *   `{"message":"Repository with id:&lt;name&gt; is invalid. Please enter a valid repository ID."}`.
+ *
+ * That is why this class exposes two lookup methods:
+ *   - `getRepositoryId(name)`  — returns the name itself if the repo exists; for CMIS sessions.
+ *   - `getRepositoryUuid(name)` — returns the SDM internal UUID; for REST DELETE.
+ *
+ * Other notes:
+ * - The browser binding URL is `{ecmServiceUrl}/browser`.
+ * - Repository creation uses REST API v2 at `{ecmServiceUrl}/rest/v2/repositories/`.
+ * - GET returns `repoAndConnectionInfos` as a single object when there is only one
+ *   repository, or as an array otherwise. Both lookups use `JsonNode.findValues("repository")`
+ *   to traverse the tree, which works for both shapes.
  */
 public class DocumentServiceClient {
 
@@ -82,10 +100,23 @@ public class DocumentServiceClient {
 
     /**
      * Create a new repository via SDM REST API v2.
-     * The request body must use a nested format: {"repository": {"name": ..., ...}}
-     * Handles 409 Conflict (repository already exists) gracefully.
+     *
+     * The request body must use a nested format: `{"repository": {"name": ..., ...}}`.
+     *
+     * **Why we pre-check existence:** SDM's POST is idempotent at the HTTP level — it
+     * returns `201 Created` even when a repository with the same name already exists,
+     * so we cannot detect the conflict from the HTTP status alone. The Neo `EcmService`,
+     * by contrast, threw on duplicate creation. To preserve the original semantics
+     * (so existing integration tests that expect HTTP 412 Precondition Failed still
+     * pass), this method does a `repositoryExists` check first and throws
+     * {@link RepositoryAlreadyExistsException} when it sees one.
      */
-    public String createRepository(String repositoryName) {
+    public String createRepository(String repositoryName) throws RepositoryAlreadyExistsException {
+        if (repositoryExists(repositoryName)) {
+            throw new RepositoryAlreadyExistsException(
+                "Repository already exists: " + repositoryName);
+        }
+
         String repoUrl = bindingAccessor.getEcmServiceUrl() + "/rest/v2/repositories/";
 
         try (CloseableHttpClient httpClient = HttpClients.createDefault()) {
@@ -116,11 +147,6 @@ public class DocumentServiceClient {
             int statusCode = response.getStatusLine().getStatusCode();
             String responseBody = EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8);
 
-            if (statusCode == HttpStatus.SC_CONFLICT) {
-                log.info("Repository already exists: {}", repositoryName);
-                return getRepositoryId(repositoryName);
-            }
-
             if (statusCode != HttpStatus.SC_CREATED && statusCode != HttpStatus.SC_OK) {
                 log.error("Failed to create repository. Status: {}, Response: {}",
                     statusCode, responseBody);
@@ -128,8 +154,12 @@ public class DocumentServiceClient {
                     "Failed to create repository: " + statusCode + " - " + responseBody);
             }
 
+            // SDM returns the created repository as a FLAT JSON document — fields like
+            // `id`, `name`, `cmisRepositoryId`, `repositoryType` sit at the top level,
+            // NOT wrapped in a `{"repository": {...}}` envelope. (The request body uses
+            // the wrapper; the response does not. Don't symmetrize the two.)
             JsonNode created = objectMapper.readTree(responseBody);
-            String name = created.path("repository").path("name").asText(null);
+            String name = created.path("name").asText(null);
             if (name == null || name.isEmpty()) {
                 throw new RuntimeException(
                     "Repository created but response missing repository name: " + responseBody);
@@ -142,44 +172,96 @@ public class DocumentServiceClient {
     }
 
     /**
-     * Check if repository exists
+     * Delete a repository via SDM REST API v2.
+     *
+     * The path segment is the SDM internal UUID — the `id` field from
+     * `GET /rest/v2/repositories/` — NOT the repository name. SDM rejects the name
+     * with HTTP 500 `{"message":"Repository with id:<name> is invalid..."}`. This is
+     * the opposite identifier rule from the CMIS session, which uses the name.
      */
-    public boolean repositoryExists(String repositoryName) {
-        try {
-            getRepositoryId(repositoryName);
-            return true;
-        } catch (CmisObjectNotFoundException e) {
-            return false;
+    public void deleteRepository(String repositoryName) throws CmisObjectNotFoundException {
+        // Resolve UUID before issuing DELETE — also serves as the existence check,
+        // throwing CmisObjectNotFoundException if the repo isn't there.
+        String repoUuid = getRepositoryUuid(repositoryName);
+
+        String repoUrl = normalizeUrl(
+            bindingAccessor.getEcmServiceUrl(),
+            "/rest/v2/repositories/" + repoUuid);
+
+        try (CloseableHttpClient httpClient = HttpClients.createDefault()) {
+            HttpDelete request = new HttpDelete(repoUrl);
+
+            String token = bindingAccessor.getAuthorizationToken();
+            request.setHeader(HttpHeaders.AUTHORIZATION, "Bearer " + token);
+            request.setHeader(HttpHeaders.CONTENT_TYPE, "application/json");
+
+            HttpResponse response = httpClient.execute(request);
+            int statusCode = response.getStatusLine().getStatusCode();
+            String responseBody = EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8);
+
+            if (statusCode == HttpStatus.SC_NOT_FOUND) {
+                throw new CmisObjectNotFoundException("Repository not found: " + repositoryName);
+            }
+
+            if (statusCode != HttpStatus.SC_OK && statusCode != HttpStatus.SC_NO_CONTENT) {
+                log.error("Failed to delete repository. Status: {}, Response: {}",
+                    statusCode, responseBody);
+                throw new RuntimeException(
+                    "Failed to delete repository: " + statusCode + " - " + responseBody);
+            }
+
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to delete repository", e);
         }
     }
 
     /**
-     * Get CMIS repository ID by name.
-     * Important: SDM's CMIS browser binding uses the repository NAME as the repositoryId,
-     * NOT the cmisRepositoryId field from the REST API (which is actually the root folder ID).
-     * Also handles the case where repoAndConnectionInfos is a single object (not array)
-     * when there is only one repository.
+     * Check if repository exists. Walks every `name` field anywhere in the
+     * `repoAndConnectionInfos` subtree, which means it works whether SDM returns
+     * `repoAndConnectionInfos` as a single object or as an array.
+     */
+    public boolean repositoryExists(String repositoryName) {
+        JsonNode repoAndConn = getRepoAndConnectionInfos();
+        if (repoAndConn == null || repoAndConn.isMissingNode() || repoAndConn.isNull()) {
+            return false;
+        }
+        return repoAndConn.findValuesAsText("name").contains(repositoryName);
+    }
+
+    /**
+     * Look up the CMIS repository identifier for a given repository name.
+     *
+     * For SDM's CMIS browser binding, the repository identifier IS the repository name —
+     * so this method just verifies the repo exists and echoes the name back. (We keep it
+     * as a method, not a no-op at the call site, to keep the CMIS-vs-REST identifier
+     * distinction explicit at every call.)
      */
     public String getRepositoryId(String repositoryName) throws CmisObjectNotFoundException {
-        JsonNode repoInfo = getRepositoriesInfo();
-        JsonNode repoAndConn = repoInfo.path("repoAndConnectionInfos");
+        if (!repositoryExists(repositoryName)) {
+            throw new CmisObjectNotFoundException("Repository not found: " + repositoryName);
+        }
+        return repositoryName;
+    }
 
-        if (repoAndConn.isArray()) {
-            // Multiple repositories: array of {repository: {...}, connection: {...}}
-            for (JsonNode repo : repoAndConn) {
-                JsonNode repository = repo.path("repository");
+    /**
+     * Look up the SDM internal UUID for a given repository name. Required for
+     * `DELETE /rest/v2/repositories/{uuid}` — SDM rejects the name in that path.
+     *
+     * Uses `findValues("repository")` to traverse the response tree without caring
+     * whether `repoAndConnectionInfos` is a single object or an array.
+     */
+    public String getRepositoryUuid(String repositoryName) throws CmisObjectNotFoundException {
+        JsonNode repoAndConn = getRepoAndConnectionInfos();
+        if (repoAndConn != null && !repoAndConn.isMissingNode() && !repoAndConn.isNull()) {
+            for (JsonNode repository : repoAndConn.findValues("repository")) {
                 if (repositoryName.equals(repository.path("name").asText())) {
-                    return repositoryName;
+                    String uuid = repository.path("id").asText(null);
+                    if (uuid != null && !uuid.isEmpty()) {
+                        return uuid;
+                    }
                 }
             }
-        } else if (repoAndConn.isObject()) {
-            // Single repository: single object {repository: {...}, connection: {...}}
-            JsonNode repository = repoAndConn.path("repository");
-            if (repositoryName.equals(repository.path("name").asText())) {
-                return repositoryName;
-            }
         }
-
         throw new CmisObjectNotFoundException("Repository not found: " + repositoryName);
     }
 
@@ -194,6 +276,15 @@ public class DocumentServiceClient {
             return base + "/" + path;
         }
         return base + path;
+    }
+
+    /**
+     * Return just the `repoAndConnectionInfos` subtree from `GET /rest/v2/repositories/`.
+     * Callers don't care about the wrapper. Returns the missing-node sentinel if the field
+     * is absent — both `repositoryExists` and `getRepositoryUuid` handle that.
+     */
+    private JsonNode getRepoAndConnectionInfos() {
+        return getRepositoriesInfo().path("repoAndConnectionInfos");
     }
 
     private JsonNode getRepositoriesInfo() {

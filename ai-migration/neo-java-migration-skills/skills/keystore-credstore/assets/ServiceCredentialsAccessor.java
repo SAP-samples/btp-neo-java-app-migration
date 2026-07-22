@@ -1,4 +1,4 @@
-package com.sap.cloud.sample.credstore.service;
+package com.example.document;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sap.cloud.environment.servicebinding.api.DefaultServiceBindingAccessor;

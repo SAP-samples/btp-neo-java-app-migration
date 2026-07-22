@@ -66,7 +66,7 @@ Also required:
 
 ### Step 2: Add OpenCMIS Dependencies
 
-> **Prerequisite — `sdk-modules-bom` must be imported.** The `ServiceBindingAccessor` asset (Step 3) calls `DefaultServiceBindingAccessor.getInstance()` from `com.sap.cloud.environment.servicebinding.api.*`. Those classes are managed by `com.sap.cloud.sdk:sdk-modules-bom` at `provided` scope — the buildpack ships its own (newer) implementation at runtime. The `sdk-replacement` skill (a prerequisite for this one) already adds `sdk-modules-bom` and `scp-cf`; if for some reason your `pom.xml` does not import it, add it now.
+> **Prerequisite — `sdk-modules-bom` and `scp-cf` must already be present from `sdk-replacement`.** The `ServiceBindingAccessor` asset (Step 3) calls `DefaultServiceBindingAccessor.getInstance()` from `com.sap.cloud.environment.servicebinding.api.*`, which is supplied by `scp-cf` and version-managed by `sdk-modules-bom` at `provided` scope (the buildpack ships its own — newer — implementation at runtime). Both are added by the `sdk-replacement` prerequisite skill; this skill does **not** add them. If they are missing, rerun `sdk-replacement` rather than patching them in by hand.
 >
 > **Do NOT** add `com.sap.cloud.environment.servicebinding:*` as a direct `compile`-scope dependency. Bundling a different version of those classes inside the WAR causes a runtime `ServiceConfigurationError: SapVcapServicesServiceBindingAccessor not a subtype` because the buildpack-provided interface and the WAR-bundled implementation are loaded by different classloaders.
 
@@ -97,16 +97,17 @@ Add to `pom.xml`:
         <groupId>com.fasterxml.jackson.core</groupId>
         <artifactId>jackson-databind</artifactId>
     </dependency>
-
-    <!-- SAP Cloud SDK — supplies the service binding API at provided scope.
-         Already added by the sdk-replacement prerequisite skill; listed here
-         only so you know what the ServiceBindingAccessor asset depends on. -->
-    <dependency>
-        <groupId>com.sap.cloud.sdk.cloudplatform</groupId>
-        <artifactId>scp-cf</artifactId>
-    </dependency>
 </dependencies>
 ```
+
+> **What about `scp-cf`?** The `ServiceBindingAccessor` asset depends on
+> `com.sap.cloud.sdk.cloudplatform:scp-cf` (which transitively brings the
+> `com.sap.cloud.environment.servicebinding.api.*` classes used by
+> `DefaultServiceBindingAccessor.getInstance()`). That dependency — along with
+> `sdk-modules-bom` — is the declared responsibility of the **`sdk-replacement`**
+> skill, which is a prerequisite of this one. Do **not** add `scp-cf` again
+> here. If your `pom.xml` is missing it, that means the `sdk-replacement` step
+> didn't complete; rerun it instead of patching the dependency in by hand.
 
 > **Important:** OpenCMIS libraries have NOT been migrated to Jakarta EE. They still use `javax.*` namespaces. This is acceptable as they are self-contained.
 
@@ -121,12 +122,39 @@ Key features:
 
 ### Step 4: Create Document Service Client
 
-Copy [assets/DocumentServiceClient.java](assets/DocumentServiceClient.java) to your project:
+Copy these two files to your project (both declare `package com.example.document;`):
+
+- [assets/DocumentServiceClient.java](assets/DocumentServiceClient.java) — main client
+- [assets/RepositoryAlreadyExistsException.java](assets/RepositoryAlreadyExistsException.java) — checked exception thrown when `createRepository` is called for an existing repo
 
 Key features:
 - Creates CMIS sessions for repositories
-- Repository management (create, list, check existence)
+- Repository management — create, delete, list, check existence
 - OAuth2 authentication integration
+- Pre-checks existence before POSTing a create, because SDM is idempotent at the HTTP layer (see Common Issues below) — the alternative is silently double-creating, which the Neo `EcmService` never did.
+
+> **Identifier rule — the two endpoints take DIFFERENT identifiers, do not collapse them:**
+>
+> - **CMIS browser binding** (`SessionParameter.REPOSITORY_ID`) uses the repository **name**.
+>   Verify by hitting `GET {ecmServiceUrl}/browser` — the response is a map keyed by names.
+>   The REST GET response also has a `cmisRepositoryId` field, but that is the *root folder
+>   ID*, not the CMIS repository id; using it produces `Repository 'xxx' not found!` from
+>   OpenCMIS.
+>
+> - **REST DELETE** (`DELETE /rest/v2/repositories/{X}`) uses the SDM internal **UUID** —
+>   the `id` field returned by `GET /rest/v2/repositories/`, e.g. `f3023e03-81da-4be4-...`.
+>   Passing the name produces HTTP 500 with body
+>   `{"message":"Repository with id:<name> is invalid. Please enter a valid repository ID."}`.
+>
+> The asset has **two** lookup methods to keep this distinction explicit:
+> `getRepositoryId(name)` → returns the name (for CMIS) and `getRepositoryUuid(name)` →
+> returns the UUID (for DELETE). Do not "simplify" them into one.
+
+If the Neo source called `ecmService.deleteRepository(name, ...)` or
+`ecmService.forceDeleteRepository(name, ...)`, route it to
+`documentClient.deleteRepository(name)`. The Neo `EcmService` distinguishes empty vs.
+non-empty deletion; SDM's REST API does not — use one method on the migrated side and let
+SDM return the appropriate error if the repo is non-empty.
 
 ### Step 5: Update Application Code
 
@@ -154,13 +182,37 @@ public void handleDocument() {
 ```
 
 **After (Cloud Foundry):**
+
+> **Note on the package**: the assets declare `package com.example.document;` as a placeholder.
+> Rename to your project's package (e.g. `com.acme.docs`) when you copy them in, and update the
+> imports below to match.
+>
+> **Note on servlet imports**: this is the Jakarta migration target — use `jakarta.servlet.*`,
+> not `javax.servlet.*`. The Neo originals will be `javax.*`; the `jakarta-java25-migration`
+> skill should have already rewritten them.
+
 ```java
 import com.example.document.DocumentServiceClient;
+import com.example.document.RepositoryAlreadyExistsException;
+
 import org.apache.chemistry.opencmis.client.api.Session;
 import org.apache.chemistry.opencmis.client.api.Folder;
 import org.apache.chemistry.opencmis.client.api.Document;
+import org.apache.chemistry.opencmis.client.api.CmisObject;
 import org.apache.chemistry.opencmis.commons.data.ContentStream;
 import org.apache.chemistry.opencmis.commons.enums.VersioningState;
+import org.apache.chemistry.opencmis.commons.exceptions.CmisObjectNotFoundException;
+
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServlet;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
+import java.util.Map;
 
 public class DocumentServlet extends HttpServlet {
 
@@ -171,9 +223,16 @@ public class DocumentServlet extends HttpServlet {
 
         String repoName = "my-repo";
 
-        // Create repository if not exists
+        // Create repository if not exists. createRepository will also throw
+        // RepositoryAlreadyExistsException on its own pre-check; the explicit
+        // repositoryExists() guard here just avoids the throw on the happy path.
         if (!documentClient.repositoryExists(repoName)) {
-            documentClient.createRepository(repoName);
+            try {
+                documentClient.createRepository(repoName);
+            } catch (RepositoryAlreadyExistsException e) {
+                // Race: someone else created it between our check and call.
+                // For the typical "ensure exists" flow this is fine — proceed.
+            }
         }
 
         // Get CMIS session
@@ -187,7 +246,7 @@ public class DocumentServlet extends HttpServlet {
         response.getWriter().println("{\"documents\": [");
 
         boolean first = true;
-        for (org.apache.chemistry.opencmis.client.api.CmisObject obj : rootFolder.getChildren()) {
+        for (CmisObject obj : rootFolder.getChildren()) {
             if (!first) response.getWriter().println(",");
             response.getWriter().printf("{\"name\": \"%s\", \"type\": \"%s\"}",
                 obj.getName(), obj.getType().getId());
@@ -219,28 +278,60 @@ public class DocumentServlet extends HttpServlet {
 
         response.getWriter().println("Created document: " + doc.getId());
     }
+
+    // Delete repository example — replaces ecmService.deleteRepository(name, ...)
+    // and ecmService.forceDeleteRepository(name, ...) from the Neo API.
+    // The asset's deleteRepository() resolves the SDM internal UUID for you;
+    // you pass the NAME at the API boundary.
+    protected void doDelete(HttpServletRequest request, HttpServletResponse response)
+            throws ServletException, IOException {
+        String repoName = request.getParameter("uniqueName");
+        try {
+            documentClient.deleteRepository(repoName);
+            response.setStatus(HttpServletResponse.SC_OK);
+        } catch (CmisObjectNotFoundException e) {
+            response.sendError(HttpServletResponse.SC_NOT_FOUND, e.getMessage());
+        }
+    }
+
+    // Create-repository handler — mirrors what Neo's ecmService.createRepository did,
+    // including the "already exists" branch. The Neo EcmService threw on duplicate;
+    // SDM does NOT (POST /rest/v2/repositories returns 201 even on duplicate). The
+    // asset closes that gap by pre-checking and throwing RepositoryAlreadyExistsException,
+    // which we map here to HTTP 412 — matching the contract of the original Neo app and
+    // any integration test that expected PRECONDITION_FAILED on duplicate creation.
+    protected void doPostCreateRepository(HttpServletRequest request, HttpServletResponse response)
+            throws ServletException, IOException {
+        String repoName = request.getParameter("uniqueName");
+        try {
+            documentClient.createRepository(repoName);
+            response.setStatus(HttpServletResponse.SC_CREATED);
+        } catch (RepositoryAlreadyExistsException e) {
+            response.sendError(HttpServletResponse.SC_PRECONDITION_FAILED, e.getMessage());
+        }
+    }
 }
 ```
 
 ### Step 6: Update MTA Descriptor
 
-Add SDM service to `mtad.yaml`:
+Bind the SDM service to your application in `mtad.yaml`. **Only add what this skill owns** —
+the application module's `parameters:`/`properties:` block is set up by the
+`tomee-runtime` / `jakarta-java25-migration` skills; do not overwrite it here.
+
+Add the `requires:` entry to your existing app module:
 
 ```yaml
 modules:
   - name: ${app-name}
-    type: java.tomcat
-    path: target/${app-name}.war
-    parameters:
-      buildpack: sap_java_buildpack_jakarta
-      disk-quota: 512MB
-      memory: 512MB
-    properties:
-      ENABLE_SECURITY_JAVA_API_V2: true
-      SET_LOGGING_LEVEL: 'ROOT: INFO'
+    # ... existing parameters/properties ...
     requires:
       - name: ${app-name}-sdm
+```
 
+And add the resource:
+
+```yaml
 resources:
   - name: ${app-name}-sdm
     type: org.cloudfoundry.managed-service
@@ -302,9 +393,19 @@ cf env ${app-name} | grep -A 30 "sdm"
 **Cause:** After stripping the trailing slash from the ECM URL, concatenating `"rest/v2/repositories/"` without a leading `/` produces a malformed URL like `https://api-sdm-di.cfapps.eu11.hana.ondemand.comrest/v2/repositories/`.
 **Solution:** Always use `+ "/rest/v2/repositories/"` (with leading `/`) or use the `normalizeUrl()` helper.
 
+### Issue: Integration test expects HTTP 412 on duplicate create, got 201
+**Cause:** The Neo `EcmService.createRepository(...)` threw on duplicate, and the migrated REST layer in many apps maps that to HTTP 412 Precondition Failed. SDM's REST API does NOT preserve that behaviour — `POST /rest/v2/repositories/` returns **201 Created** whether or not a repository with the same name exists. So a naive port of `createRepository` that just forwards SDM's status produces 201 in both cases, and tests like `whenCreate_givenExistingRepoName_thenReturnErrorResponse` start failing with `expected: <412> but was: <201>`.
+**Solution:** Pre-check existence with `repositoryExists(name)` before POSTing, and throw a checked exception (the asset uses `RepositoryAlreadyExistsException`) when it returns true. Map that exception to HTTP 412 in the REST/servlet layer. The asset's `createRepository(...)` already does the pre-check and the throw; the migrated `DocumentServiceRest` just needs the matching `catch` branch — see the Step 5 example.
+
 ### Issue: 406 "Repository Name is missing" when creating repository
 **Cause:** SDM REST API v2 requires a nested JSON format: `{"repository": {"name": "...", "displayName": "...", ...}}`. A flat format like `{"repository": "name"}` is rejected.
 **Solution:** The asset's `createRepository()` method uses the correct nested `ObjectNode` format.
+
+### Issue: POST returns HTTP 500 with body `Repository created but response missing repository name: { ... "name": "...", "id": "...", ... }`
+**Cause:** The request and response shapes for `POST /rest/v2/repositories/` are NOT symmetric. The **request** body wraps everything in `{"repository": {...}}`, but the **response** is a FLAT JSON document — `name`, `id`, `cmisRepositoryId`, `repositoryType` sit at the top level, with no `"repository"` envelope. Code that mirrors the request shape and reads `created.path("repository").path("name")` always sees null and throws — even though SDM did create the repository. The error then cascades: the next test sees the repo exists on the server but the in-process state thinks it doesn't, so cleanup-on-teardown calls DELETE → 404, and every test that depends on a clean slate fails.
+**Solution:** Read fields directly off the top of the response (`created.path("name")`, `created.path("id")`). The asset does this correctly; do not "fix" it to walk through a `repository` envelope.
+
+> **Asymmetry rule:** SDM's repository endpoints have an asymmetric envelope. POST request: wrapped (`{"repository": {...}}`). POST response: flat. GET response: wrapped, inside `repoAndConnectionInfos` (and that field is a single object when there's only one repo, an array otherwise). When in doubt, log the raw response body before parsing.
 
 ### Issue: 412 "Please add entitlements for Document Management, repository option"
 **Cause:** The BTP subaccount is missing the "Document Management, repository option" entitlement.
@@ -314,13 +415,17 @@ cf env ${app-name} | grep -A 30 "sdm"
 **Cause:** Eventual consistency delay.
 **Solution:** Add a small delay or retry logic after creation.
 
-### Issue: `getRepositoryId` fails with single repository
-**Cause:** SDM REST API returns `repoAndConnectionInfos` as a single JSON object (not an array) when there is only one repository. Iterating over an ObjectNode yields field values, not repository entries.
-**Solution:** The asset's `getRepositoryId()` checks `isArray()` vs `isObject()` and handles both cases.
+### Issue: Repository lookup fails when only one repository exists
+**Cause:** SDM returns `repoAndConnectionInfos` as a single JSON object (not an array) when there is only one repository, and as an array otherwise. Code that does `for (JsonNode r : repoAndConn)` over the ObjectNode iterates over its field *values* (the inner `repository` and `connection` nodes), not over repository entries — silently missing the only entry.
+**Solution:** The asset uses `JsonNode.findValues("repository")`, which recursively walks the tree and yields every `repository` node regardless of whether the parent is an array or a single object. `repositoryExists` similarly uses `findValuesAsText("name")`. This is also why the asset has no `if (repoAndConn.isArray())` branching — `findValues` handles both shapes uniformly.
 
 ### Issue: CMIS session fails with "Repository 'xxx' not found!"
-**Cause:** The SDM REST API has two different ID fields: `id` (SDM internal ID) and `cmisRepositoryId` (root folder ID). Neither of these is the correct value for OpenCMIS `SessionParameter.REPOSITORY_ID`. The CMIS browser binding uses the **repository name** as the repositoryId.
-**Solution:** `getRepositoryId()` returns the repository name, which is what the CMIS browser binding expects. This can be verified by querying `GET {ecmServiceUrl}/browser` which returns a map keyed by repository names.
+**Cause:** The CMIS `SessionParameter.REPOSITORY_ID` was set to either `id` (SDM internal UUID) or `cmisRepositoryId` (root folder ID) from the REST response. Neither is what the CMIS browser binding wants — it keys on the repository **name**.
+**Solution:** Use the asset's `getRepositoryId(name)`, which returns the name back to you. Verify the contract independently with `GET {ecmServiceUrl}/browser` — the response is a JSON map keyed by repository names. (For the REST DELETE endpoint, the rule is opposite — use `getRepositoryUuid(name)` instead.)
+
+### Issue: DELETE returns HTTP 500 with body `Repository with id:<name> is invalid. Please enter a valid repository ID.`
+**Cause:** `DELETE /rest/v2/repositories/{X}` was called with the repository **name** in the path. SDM's DELETE endpoint expects the SDM internal **UUID** there (the `id` field from `GET /rest/v2/repositories/`, e.g. `f3023e03-81da-4be4-...`). Note the wording in SDM's error: it says "with id:<name>" — i.e. SDM is reading what you passed *as* an id, sees that it's not a UUID it knows, and rejects it. This is the OPPOSITE of the CMIS session rule above (which uses the name); the two endpoints take different identifiers.
+**Solution:** Look up the UUID first, then DELETE. The asset does this with `getRepositoryUuid(name)` → `DELETE /rest/v2/repositories/{uuid}`. If a single shared `getRepositoryId` helper exists and returns the name, do not reuse it for DELETE — call `getRepositoryUuid` (or fetch `repository.path("id")` directly) instead. The cascade is recognizable: after the first DELETE 500, the test's per-method cleanup keeps DELETEing and seeing 500 (or 404 if the first one happened to succeed server-side), and `whenConnect_givenNotExistingRepoName` etc. all fail because the test environment is no longer in a clean state.
 
 ## Next Steps
 

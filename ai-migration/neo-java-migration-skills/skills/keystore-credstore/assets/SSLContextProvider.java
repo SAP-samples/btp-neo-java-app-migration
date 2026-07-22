@@ -1,6 +1,5 @@
-package com.sap.cloud.sample.credstore.authentication;
+package com.example.document;
 
-import com.sap.cloud.sample.credstore.service.ServiceCredentials;
 import org.apache.http.ssl.SSLContextBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

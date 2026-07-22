@@ -1,6 +1,6 @@
 {
   "name": "sap-btp-neo-migration",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "SAP BTP Neo to Cloud Foundry migration skills. Includes orchestrators for end-to-end app migration and complete subaccount configuration migration, individual skills for Jakarta EE, XSUAA authentication, destinations, connectivity, HANA persistence, document management, credential store, TomEE runtime, MTA deployment, Neo subaccount configuration export and import (trust, destinations, roles), and neo-destinations-keystores-migrator for direct in-memory migration of destinations and keystores from Neo to CF.",
   "skills": "../ai-migration/neo-java-migration-skills/skills",
   "license": "Apache-2.0",

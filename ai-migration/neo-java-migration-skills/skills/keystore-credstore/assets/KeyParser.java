@@ -1,4 +1,4 @@
-package com.sap.cloud.sample.credstore.authentication;
+package com.example.document;
 
 import org.bouncycastle.asn1.pkcs.PrivateKeyInfo;
 import org.bouncycastle.openssl.PEMKeyPair;

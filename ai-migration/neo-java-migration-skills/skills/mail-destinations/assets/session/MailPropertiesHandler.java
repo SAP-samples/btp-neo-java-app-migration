@@ -1,4 +1,4 @@
-package com.sap.cloud.sample.mail.session;
+package com.example.document;
 
 import com.sap.cloud.sdk.cloudplatform.connectivity.Destination;
 import org.slf4j.Logger;
