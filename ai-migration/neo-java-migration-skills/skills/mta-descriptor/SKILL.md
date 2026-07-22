@@ -175,7 +175,7 @@ parameters:
 modules:
   - name: my-app-backend
     type: java.tomcat
-    path: target/ROOT.war
+    path: target/<artifactId>.war      # ← substitute the literal artifactId from pom.xml
 
     parameters:
       memory: 1024M
@@ -245,7 +245,7 @@ modules:
   # Backend Java application
   - name: my-app-backend
     type: java.tomcat
-    path: target/ROOT.war
+    path: target/<artifactId>.war      # ← substitute the literal artifactId from pom.xml
     parameters:
       memory: 1024M
       disk-quota: 1024M
@@ -284,7 +284,7 @@ resources:
 
 ```
 
-> **Critical:** The Java backend `path` must point to `target/ROOT.war` (not `target/myapp.war`). See "WAR context path" in Troubleshooting below.
+> **Critical:** The Java backend `path` must point to the actual WAR file Maven produces — read the `<artifactId>` from `pom.xml` and substitute it literally (e.g. `path: target/connectivity.war` for a project whose `artifactId` is `connectivity`). See the "WAR filename rule" callout above this section. The app will serve at `/<artifactId>`; ensure tests and approuter destinations use that prefix.
 
 > **Note on `type: nodejs` vs `type: approuter.nodejs`:** Use `type: nodejs` when deploying the approuter with your own `approuter/` directory and `package.json` (which is the standard pattern for migrated Neo applications). The type `approuter.nodejs` is for the "managed approuter" pattern which is used only in specific multi-tenant scenarios.
 

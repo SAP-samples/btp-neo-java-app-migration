@@ -360,6 +360,22 @@ Replace Neo-specific imports with SAP Cloud SDK equivalents:
 
 See [assets/pom-cf-tomcat.xml](assets/pom-cf-tomcat.xml) for a complete template.
 
+### Step 10: Build packaging — owned by `mta-descriptor`
+
+This skill is a **dependency-management** skill: it swaps Neo `pom.xml`
+dependencies for the CF BOM, SAP Cloud SDK modules BOM, and Cloud
+Security library. Build packaging — specifically the `maven-war-plugin`
+configuration that pins the WAR filename to `<artifactId>.war` — is a
+**deployment concern** and lives in the `mta-descriptor` skill, where
+the matching `path: target/<artifactId>.war` rule is documented.
+
+The shipped pom templates (`assets/pom-cf-tomcat.xml`) already include
+the correct `<build>` block. If you wrote `pom.xml` from scratch instead
+of copying the asset, **read `mta-descriptor`'s "Precondition —
+`pom.xml` MUST configure `maven-war-plugin`…" section before generating
+the descriptor.** That section has the required plugin block, the
+self-check, and the failure-mode explanation in one place.
+
 ## Configuration Files
 
 No new configuration files required for this skill alone. The MTA descriptor will be created after all skills are applied.
