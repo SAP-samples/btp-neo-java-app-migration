@@ -168,7 +168,7 @@ Run `cf target` and show the output to the user. Confirm the correct org and spa
 After both disclaimers are acknowledged and all required inputs have been collected (TOKEN, HOST, ACCOUNT), fetch the Neo app list:
 
 ```bash
-curl -sk "https://api.${HOST}/lifecycle/v1/accounts/${ACCOUNT}/apps" \
+curl -s "https://api.${HOST}/lifecycle/v1/accounts/${ACCOUNT}/apps" \
   -H "Authorization: Bearer ${TOKEN}"
 ```
 Extract `entity.applicationName` from each item in the `apps` array. Follow `nextUrl` for pagination.

@@ -96,7 +96,7 @@ RESULTS = Results()
 
 def neo_get_text(url):
     r = subprocess.run(
-        ["curl", "-sk", "-w", "\n__STATUS__%{http_code}", url,
+        ["curl", "-s", "-w", "\n__STATUS__%{http_code}", url,
          "-H", f"Authorization: Bearer {NEO_TOKEN}"],
         capture_output=True)
     try:
@@ -121,7 +121,7 @@ def neo_get_json(url):
 def neo_get_binary(url):
     """Return raw bytes from Neo API."""
     r = subprocess.run(
-        ["curl", "-sk", "-w", "\n__STATUS__%{http_code}", url,
+        ["curl", "-s", "-w", "\n__STATUS__%{http_code}", url,
          "-H", f"Authorization: Bearer {NEO_TOKEN}"],
         capture_output=True)
     raw = r.stdout
@@ -143,8 +143,10 @@ def neo_get_binary(url):
 
 def neo_get_headers(url):
     r = subprocess.run(
-        ["curl", "-sk", "-I", url, "-H", f"Authorization: Bearer {NEO_TOKEN}"],
+        ["curl", "-s", "-I", url, "-H", f"Authorization: Bearer {NEO_TOKEN}"],
         capture_output=True)
+    if r.returncode != 0:
+        raise RuntimeError(f"curl failed fetching headers for {url}: {r.stderr.decode('utf-8', errors='replace').strip()}")
     return r.stdout.decode("utf-8")
 
 
