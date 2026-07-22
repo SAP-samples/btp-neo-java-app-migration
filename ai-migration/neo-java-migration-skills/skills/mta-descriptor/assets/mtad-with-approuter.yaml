@@ -94,5 +94,9 @@ resources:
   #     service: connectivity
   #     service-plan: lite
   #
+  # HANA: do NOT add `parameters: service: hana, service-plan: hdi-shared`
+  # — those keys belong on `org.cloudfoundry.managed-service`, not on
+  # `com.sap.xs.hana-schema`. Adding them triggers
+  # CF-UnprocessableEntity(10008): Invalid service plan at deploy time.
   # - name: ${app-name}-hana
   #   type: com.sap.xs.hana-schema

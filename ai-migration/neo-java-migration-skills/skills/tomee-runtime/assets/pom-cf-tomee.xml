@@ -27,10 +27,11 @@
         <maven.compiler.target>${java.version}</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
-        <!-- SAP BTP SDK versions -->
-        <!-- Note: Using cf-tomee-bom instead of cf-tomcat-bom -->
-        <cf-tomee-bom-version>2.22.0</cf-tomee-bom-version>
-        <sdk-modules-bom-version>5.14.0</sdk-modules-bom-version>
+        <!-- SAP BTP SDK versions — resolve via the lookup script
+             (see sdk-replacement Step 3); do NOT ship literal placeholders.
+             Note: Using cf-tomee-bom instead of cf-tomcat-bom. -->
+        <cf-tomee-bom-version>RESOLVED_CF_TOMEE_BOM_VERSION</cf-tomee-bom-version>
+        <sdk-modules-bom-version>RESOLVED_SDK_MODULES_BOM_VERSION</sdk-modules-bom-version>
     </properties>
 
     <dependencyManagement>
@@ -132,7 +133,19 @@
                 </configuration>
             </plugin>
 
-            <!-- WAR Plugin -->
+            <!-- WAR Plugin
+
+                 warName is deliberately set to ${project.artifactId} (not ROOT).
+                 Consequences the migration must keep aligned:
+                   - mtad.yaml's `path:` MUST be `target/<artifactId>.war`,
+                     written literally (cf deploy does not evaluate Maven
+                     property expressions).
+                   - TomEE serves the WAR at /<artifactId>, not /.
+                     Integration tests and approuter destinations must
+                     include the /<artifactId> prefix in their URLs.
+
+                 See `mta-descriptor` → "WAR filename rule" for the matching
+                 descriptor-side guidance. -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-war-plugin</artifactId>

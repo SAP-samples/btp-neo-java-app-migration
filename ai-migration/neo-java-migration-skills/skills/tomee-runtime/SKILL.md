@@ -103,8 +103,9 @@ Key changes:
 </dependencyManagement>
 
 <properties>
-    <cf-tomee-bom-version>2.25.0</cf-tomee-bom-version>
-    <sdk-modules-bom-version>5.14.0</sdk-modules-bom-version>
+    <!-- Resolve via sdk-replacement Step 3 (substitute `cf-tomee-bom` for `cf-tomcat-bom`). -->
+    <cf-tomee-bom-version>RESOLVED_CF_TOMEE_BOM_VERSION</cf-tomee-bom-version>
+    <sdk-modules-bom-version>RESOLVED_SDK_MODULES_BOM_VERSION</sdk-modules-bom-version>
     <jakarta.persistence-api-version>3.2.0</jakarta.persistence-api-version>
 </properties>
 
@@ -343,6 +344,12 @@ resources:
   - name: ${app-name}-hana
     type: com.sap.xs.hana-schema
 ```
+
+> **HANA: do NOT add `service: hana` or `service-plan: hdi-shared`** under
+> `type: com.sap.xs.hana-schema`. Those keys are for the GENERIC
+> `org.cloudfoundry.managed-service` type, not for `hana-schema` — adding
+> them triggers `CF-UnprocessableEntity(10008): Invalid service plan` at
+> deploy time. See `persistence-hana` / `mta-descriptor` for the same rule.
 
 **Key differences:**
 1. `TARGET_RUNTIME: tomee` property enables TomEE instead of Tomcat

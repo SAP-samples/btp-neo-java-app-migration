@@ -1,6 +1,6 @@
 ---
 name: keystore-credstore
-description: Use this skill whenever migrating an SAP BTP Neo Java app that uses keystores, password storage, or any JNDI-bound credential lookup to Cloud Foundry. Triggers on `com.sap.cloud.crypto.keystore.api.KeyStoreService`, `com.sap.cloud.security.password.PasswordStorage`, `<resource-ref>` blocks for `KeyStoreService` or `PasswordStorage` in `web.xml`, `InitialContext.lookup("java:comp/env/KeyStoreService"|"PasswordStorage")`, or `@Resource(name = "KeyStoreService"|"PasswordStorage")`. Even if the user just says "migrate this app to CF" without naming credentials explicitly, invoke this skill the moment any of those symbols appear in the source. Replaces JNDI lookups with the SAP Credential Store REST API over mTLS, ships an offline-friendly Lombok-free Java client, and gives a Step 4 mtad with the JRE-version pin and existing-service binding the migration pipeline expects.
+description: Use this skill whenever migrating an SAP BTP Neo Java app that uses keystores, password storage, or any JNDI-bound credential lookup to Cloud Foundry. Triggers on `com.sap.cloud.crypto.keystore.api.KeyStoreService`, `com.sap.cloud.security.password.PasswordStorage`, `<resource-ref>` blocks for `KeyStoreService` or `PasswordStorage` in `web.xml`, `InitialContext.lookup("java:comp/env/KeyStoreService"|"PasswordStorage")`, or `@Resource(name = "KeyStoreService"|"PasswordStorage")`. Even if the user just says "migrate this app to CF" without naming credentials explicitly, invoke this skill the moment any of those symbols appear in the source. Replaces JNDI lookups with the SAP Credential Store REST API over mTLS, ships an offline-friendly Lombok-free Java client, and emits a Step 4 mtad that BINDS to a pre-existing, manually-provisioned credstore instance via `org.cloudfoundry.existing-service` (do NOT create or delete the credstore from the MTA).
 disable-model-invocation: false
 allowed-tools: Read, Edit, Write, Bash, Grep, Glob
 ---
@@ -118,8 +118,9 @@ Apache HttpClient, Jackson, and SLF4J), so you only need the `scp-cf` dependency
     <maven.compiler.source>25</maven.compiler.source>
     <maven.compiler.target>25</maven.compiler.target>
 
-    <cf-tomcat-bom-version>2.22.0</cf-tomcat-bom-version>
-    <sdk-modules-bom-version>5.14.0</sdk-modules-bom-version>
+    <!-- Resolve via sdk-replacement Step 3. -->
+    <cf-tomcat-bom-version>RESOLVED_CF_TOMCAT_BOM_VERSION</cf-tomcat-bom-version>
+    <sdk-modules-bom-version>RESOLVED_SDK_MODULES_BOM_VERSION</sdk-modules-bom-version>
     <jakarta.servlet-api.version>6.1.0</jakarta.servlet-api.version>
 </properties>
 
@@ -351,24 +352,27 @@ modules:
       - name: credstore-service
 
 resources:
-  # Bind to a credstore service instance that already exists in the target space.
-  # SAP BTP enforces a quota of **1 standard credstore instance per space** — declaring
-  # this resource as `org.cloudfoundry.managed-service` (which would create a fresh one
-  # on every deploy) makes the broker reject the deploy with
-  #   "Quota is not sufficient for this request, up to 1 standard instance/s for space..."
-  # whenever an instance already exists.
+  # The credstore service instance and its stored credentials are MANUALLY
+  # provisioned and shared across applications in the space — do NOT declare
+  # this as a managed-service. SAP BTP caps credstore standard at 1 instance
+  # per space, and any namespaces/aliases (the actual secret material) are
+  # operator-owned. An MTA that creates the credstore would be deleted by
+  # `cf undeploy --delete-services`, taking every other app's credentials
+  # with it.
   #
-  # Provision the shared instance ONCE per space (manually via cockpit/CLI, or via a
-  # separate bootstrap MTA), then bind to it from every app/test deployment with
-  # `org.cloudfoundry.existing-service`. The resource's `name:` here MUST match the
-  # actual service-instance name in the space.
-  #
-  # If you genuinely need a private credstore per app and you have quota for it,
-  # switch back to org.cloudfoundry.managed-service with service: credstore,
-  # service-plan: standard, and config.authentication.type: mtls.
+  # Bind to it with `org.cloudfoundry.existing-service`. The resource `name:`
+  # below MUST match the actual service-instance name in the target space —
+  # by convention `credstore-service`, but verify with `cf services | grep
+  # credstore` if you're unsure.
   - name: credstore-service
     type: org.cloudfoundry.existing-service
 ```
+
+> **What this skill does NOT do:** create the credstore instance, define its
+> mTLS configuration, or seed namespaces/aliases. Those are one-time
+> per-space setup steps performed by the space operator (cockpit or `cf
+> create-service credstore standard credstore-service -c '{"authentication":{"type":"mtls"}}'`).
+> The migrated app only consumes credentials that are already there.
 
 ### Step 5: Create Credentials in Credential Store
 
@@ -449,8 +453,8 @@ returning `Password retrieved successfully.` on 200.
 
 ## Common Issues
 
-These are the failure modes we have actually hit in CI on this codebase. The cures
-are listed in roughly the order you would try them.
+These are real failure modes we have hit on this codebase. The cures are listed
+in roughly the order you would try them.
 
 ### `java.lang.UnsupportedClassVersionError: ... class file version 69.0, this version of the Java Runtime only recognizes class file versions up to 65.0`
 
@@ -470,16 +474,45 @@ Confirm at runtime with `cf ssh <app-name> -c 'cat app/META-INF/.sap_java_buildp
 
 ### `Service broker error ... Quota is not sufficient for this request, up to 1 standard instance/s for space`
 
-**Symptom:** Deploy fails during `Processing service "credstore-service"...`.
+**Symptom:** Deploy fails during `Processing service "credstore-service"...`
+with the quota broker error above.
 
-**Cause:** Mtad declares the credstore as `org.cloudfoundry.managed-service`, which
-asks the broker to create a fresh instance. SAP BTP space quotas typically allow
-only 1 standard credstore per space, so every deploy after the first fails.
+**Cause:** The mtad declares the credstore as `org.cloudfoundry.managed-service`,
+which asks the broker to create a fresh instance. SAP BTP caps credstore
+standard at 1 instance per space, so the broker rejects the create.
 
-**Fix:** Provision the shared instance once per space (manually or via a one-shot
-bootstrap MTA), then bind to it via `org.cloudfoundry.existing-service` as shown
-in Step 4. The resource's `name:` must match the actual service-instance name in
-the space.
+**Fix:** Change the resource type to `org.cloudfoundry.existing-service` and
+remove the `parameters:` block — the credstore is operator-managed and shared,
+not owned by this MTA. The result should look exactly like:
+
+```yaml
+  - name: credstore-service
+    type: org.cloudfoundry.existing-service
+```
+
+See Step 4 for the full mtad context. If `credstore-service` doesn't exist in
+the space at all, ask the operator to provision it once (`cf create-service
+credstore standard credstore-service -c '{"authentication":{"type":"mtls"}}'`)
+and seed the required namespaces/aliases — this skill does NOT create credstore
+instances or credentials.
+
+### `Controller operation failed: 404 Not Found: Service instance credstore-service not found`
+
+**Symptom:** Deploy fails almost immediately with the 404 above (or a similar
+404 naming whatever value is in the resource's `name:`), repeated 4× then
+`Process failed`.
+
+**Cause:** Mtad declares `org.cloudfoundry.existing-service` (correctly), but no
+instance with that exact `name:` exists in the target space. Either the
+operator hasn't provisioned the shared credstore yet, or the name in `mtad.yaml`
+doesn't match what's actually in the space.
+
+**Fix:** Run `cf services | grep credstore` in the target space. If you see an
+instance under a different name, update the resource's `name:` (and every
+matching `requires.name:` in the module) to that exact string. If you see no
+credstore at all, that's an operator setup gap — ask whoever owns the space to
+provision it as described in Step 5 of this skill. The migration does NOT
+auto-create credstore instances; the credentials inside are operator-seeded.
 
 ### `Error collecting system parameters: A higher version of your MTA is already deployed`
 
@@ -504,13 +537,26 @@ longer references (e.g. `pass-store-credstore`, `keystore-credstore`). The MTA's
 persisted manifest still remembers it and tries to "detach" it on every deploy.
 The orphan service is in `create failed` state, so the cleanup hangs.
 
-**Fix:** Run once per space, then re-deploy:
+**Fix:** Detach the orphan service from the MTA manifest WITHOUT deleting it.
+The shared `credstore-service` is operator-managed and may hold credentials
+that other apps depend on — `--delete-services` would destroy it.
+
+Detach the specific orphan only:
 ```bash
-cf undeploy <mta-id> --delete-services -f
+cf v3-unbind-service <orphan-name> <app-name> 2>/dev/null || true
+cf delete-service <orphan-name> -f    # ONLY if you confirmed the orphan is a
+                                       # leftover *owned* by this MTA (e.g.
+                                       # `pass-store-credstore`), NOT the shared
+                                       # `credstore-service`.
 ```
-That clears both the persisted manifest and any orphan instances. The shared
-`credstore-service` you bind to via `existing-service` is owned by other MTAs and
-stays untouched.
+
+For the persisted MTA manifest, use the targeted form:
+```bash
+cf undeploy <mta-id> --delete-service-keys --delete-service-brokers -f
+```
+Note the **absence of `--delete-services`** — keep the operator-owned
+`credstore-service` intact. The next deploy will re-bind to it via
+`existing-service` from the descriptor.
 
 ### SSL handshake failure during `CredStoreClient` init
 

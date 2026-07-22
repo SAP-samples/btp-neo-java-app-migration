@@ -126,6 +126,32 @@ resources:
     type: com.sap.xs.hana-schema
 ```
 
+> **CRITICAL — do NOT add `service: hana` or `service-plan: hdi-shared`
+> under a `com.sap.xs.hana-schema` resource.**
+>
+> ❌ Anti-pattern subagents sometimes emit (it breaks deploy):
+> ```yaml
+> - name: ${app-name}-hana
+>   type: com.sap.xs.hana-schema
+>   parameters:
+>     service: hana              # ← WRONG for hana-schema
+>     service-plan: hdi-shared   # ← WRONG for hana-schema
+> ```
+> Those two keys belong on the GENERIC
+> `type: org.cloudfoundry.managed-service` (xsuaa, destination, credstore,
+> sdm, …). The dedicated `com.sap.xs.hana-schema` type already implies the
+> service and the plan — adding them makes the controller reject the
+> request at deploy time with:
+>
+> > `CF-UnprocessableEntity(10008): Invalid service plan. ... Ensure that
+> > the service plan is visible in your current space ...`
+>
+> ✅ Correct form:
+> ```yaml
+> - name: ${app-name}-hana
+>   type: com.sap.xs.hana-schema
+> ```
+
 ### Step 5: Java Code (No Changes Required)
 
 The Java code using DataSource via JNDI lookup continues to work:
