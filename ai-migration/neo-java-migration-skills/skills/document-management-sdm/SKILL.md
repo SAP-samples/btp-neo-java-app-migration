@@ -66,6 +66,10 @@ Also required:
 
 ### Step 2: Add OpenCMIS Dependencies
 
+> **Prerequisite — `sdk-modules-bom` must be imported.** The `ServiceBindingAccessor` asset (Step 3) calls `DefaultServiceBindingAccessor.getInstance()` from `com.sap.cloud.environment.servicebinding.api.*`. Those classes are managed by `com.sap.cloud.sdk:sdk-modules-bom` at `provided` scope — the buildpack ships its own (newer) implementation at runtime. The `sdk-replacement` skill (a prerequisite for this one) already adds `sdk-modules-bom` and `scp-cf`; if for some reason your `pom.xml` does not import it, add it now.
+>
+> **Do NOT** add `com.sap.cloud.environment.servicebinding:*` as a direct `compile`-scope dependency. Bundling a different version of those classes inside the WAR causes a runtime `ServiceConfigurationError: SapVcapServicesServiceBindingAccessor not a subtype` because the buildpack-provided interface and the WAR-bundled implementation are loaded by different classloaders.
+
 Add to `pom.xml`:
 
 ```xml
@@ -92,6 +96,14 @@ Add to `pom.xml`:
     <dependency>
         <groupId>com.fasterxml.jackson.core</groupId>
         <artifactId>jackson-databind</artifactId>
+    </dependency>
+
+    <!-- SAP Cloud SDK — supplies the service binding API at provided scope.
+         Already added by the sdk-replacement prerequisite skill; listed here
+         only so you know what the ServiceBindingAccessor asset depends on. -->
+    <dependency>
+        <groupId>com.sap.cloud.sdk.cloudplatform</groupId>
+        <artifactId>scp-cf</artifactId>
     </dependency>
 </dependencies>
 ```
@@ -269,6 +281,10 @@ cf env ${app-name} | grep -A 30 "sdm"
 ```
 
 ## Common Issues
+
+### Issue: `ServiceConfigurationError: SapVcapServicesServiceBindingAccessor not a subtype` at runtime
+**Cause:** The WAR ships its own copy of `com.sap.cloud.environment.servicebinding.*` (typically because a direct compile-scope dependency on `java-sap-service-operator`, `java-sap-vcap-services`, or the `java-modules-bom` was added). The buildpack already provides those classes, so two versions end up in different classloaders and `ServiceLoader` rejects the in-WAR provider as "not a subtype" of the buildpack-provided interface. The error first surfaces as HTTP 500 on every SDM call, with the stacktrace bottoming out in `DefaultServiceBindingAccessor.<clinit>`.
+**Solution:** Remove any direct dependency on `com.sap.cloud.environment.servicebinding:*` from `pom.xml`. Rely on the `sdk-modules-bom` import (added by `sdk-replacement`) which manages those artifacts at `provided` scope. After fixing the pom, run `mvn dependency:tree -Dincludes=com.sap.cloud.environment.servicebinding` and confirm every line ends in `:provided`.
 
 ### Issue: "SDM service not bound"
 **Cause:** SDM service not bound to application.

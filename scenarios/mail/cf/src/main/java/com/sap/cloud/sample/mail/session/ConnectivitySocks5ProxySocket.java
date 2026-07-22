@@ -10,7 +10,10 @@ import java.net.SocketAddress;
 import java.net.SocketException;
 import java.nio.ByteBuffer;
 import java.util.Base64; // or any other library for base64 encoding
+import java.util.Map;
 
+import com.sap.cloud.environment.servicebinding.api.DefaultServiceBindingAccessor;
+import com.sap.cloud.environment.servicebinding.api.ServiceBinding;
 import com.sap.cloud.security.client.HttpClientFactory;
 import com.sap.cloud.security.config.ClientIdentity;
 import com.sap.cloud.security.config.OAuth2ServiceConfiguration;
@@ -22,9 +25,6 @@ import com.sap.cloud.security.xsuaa.client.OAuth2TokenResponse;
 import com.sap.cloud.security.xsuaa.client.XsuaaDefaultEndpoints;
 import com.sap.cloud.security.xsuaa.tokenflows.TokenFlowException;
 import com.sap.cloud.security.xsuaa.tokenflows.XsuaaTokenFlows;
-import org.json.JSONArray; // or any other library for JSON objects
-import org.json.JSONException; // or any other library for JSON objects
-import org.json.JSONObject; // or any other library for JSON objects
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -45,9 +45,7 @@ public class ConnectivitySocks5ProxySocket extends Socket {
     private static final String SOCKS5_PROXY_PORT_PROPERTY = "onpremise_socks5_proxy_port";
 
     private static final Logger LOGGER = LoggerFactory.getLogger(ConnectivitySocks5ProxySocket.class);
-    private static final String VCAP_SERVICES = "VCAP_SERVICES";
     private static final String CONNECTIVITY = "connectivity";
-    private static final String CREDENTIALS = "credentials";
     private static final String CLIENT_ID = "clientid";
     private static final String CLIENT_SECRET = "clientsecret";
     private static final String URL = "url";
@@ -61,42 +59,38 @@ public class ConnectivitySocks5ProxySocket extends Socket {
 
     @Override
     public void connect(SocketAddress endpoint, int timeout) throws IOException {
-        super.connect(getProxyAddress(), timeout);
+        Map<String, Object> credentials = extractEnvironmentCredentials();
+
+        super.connect(getProxyAddress(credentials), timeout);
 
         OutputStream outputStream = getOutputStream();
 
         executeSOCKS5InitialRequest(outputStream);
 
-        executeSOCKS5AuthenticationRequest(outputStream);
+        executeSOCKS5AuthenticationRequest(outputStream, credentials);
 
         executeSOCKS5ConnectRequest(outputStream, (InetSocketAddress) endpoint);
     }
 
-    private InetSocketAddress getProxyAddress() {
-        try {
-            LOGGER.debug("Extracting the SOCKS5 proxy host and port");
-            JSONObject credentials = extractEnvironmentCredentials();
-            String proxyHost = credentials.getString(SOCKS5_PROXY_HOST_PROPERTY);
-            int proxyPort = Integer.parseInt(credentials.getString(SOCKS5_PROXY_PORT_PROPERTY));
-            return new InetSocketAddress(proxyHost, proxyPort);
-        } catch (JSONException ex) {
-            throw new IllegalStateException("Unable to extract the SOCKS5 proxy host and port", ex);
-        }
+    private InetSocketAddress getProxyAddress(Map<String, Object> credentials) {
+        LOGGER.debug("Extracting the SOCKS5 proxy host and port");
+        String proxyHost = stringValue(credentials, SOCKS5_PROXY_HOST_PROPERTY);
+        int proxyPort = Integer.parseInt(stringValue(credentials, SOCKS5_PROXY_PORT_PROPERTY));
+        return new InetSocketAddress(proxyHost, proxyPort);
     }
 
-    private String getAuthnToken() {
+    private String getAuthnToken(Map<String, Object> credentials) {
         LOGGER.debug("Retrieving the authentication token");
         try {
             DefaultOAuth2TokenService defaultOAuth2TokenService = new DefaultOAuth2TokenService(HttpClientFactory.create(null));
-            JSONObject credentials = extractEnvironmentCredentials();
             OAuth2ServiceConfigurationBuilder builder = OAuth2ServiceConfigurationBuilder.forService(Service.XSUAA);
-            OAuth2ServiceConfiguration config = builder.withClientId(credentials.getString(CLIENT_ID))
-                                           .withClientSecret(credentials.getString(CLIENT_SECRET))
-                                           .withUrl(credentials.getString(URL)).build();
+            OAuth2ServiceConfiguration config = builder.withClientId(stringValue(credentials, CLIENT_ID))
+                                           .withClientSecret(stringValue(credentials, CLIENT_SECRET))
+                                           .withUrl(stringValue(credentials, URL)).build();
             OAuth2ServiceEndpointsProvider endpointsProvider = new XsuaaDefaultEndpoints(config);
             ClientIdentity clientIdentity = config.getClientIdentity();
-          
-          
+
+
             XsuaaTokenFlows tokenFlows = new XsuaaTokenFlows(defaultOAuth2TokenService, endpointsProvider, clientIdentity);
             OAuth2TokenResponse serviceTokenResponse = tokenFlows.clientCredentialsTokenFlow().execute();
             String accessToken = serviceTokenResponse.getAccessToken();
@@ -105,11 +99,35 @@ public class ConnectivitySocks5ProxySocket extends Socket {
             throw new RuntimeException(e);
         }
     }
-    private JSONObject extractEnvironmentCredentials() throws JSONException {
-        LOGGER.debug("Extracting the environment credentials");
-        JSONObject jsonObj = new JSONObject(System.getenv(VCAP_SERVICES));
-        JSONArray jsonArr = jsonObj.getJSONArray(CONNECTIVITY);
-        return jsonArr.getJSONObject(0).getJSONObject(CREDENTIALS);
+
+    /**
+     * Read the connectivity service credentials from the platform service binding.
+     *
+     * <p>Uses the SAP Cloud SDK Service Binding Accessor (already on the classpath via
+     * {@code sdk-modules-bom}) instead of parsing {@code VCAP_SERVICES} JSON manually.
+     * An earlier version of this class used {@code org.json}, which the SDK BOM manages
+     * at {@code provided} scope — adding the dependency made it compile but the JAR was
+     * stripped from the WAR, causing {@code NoClassDefFoundError} at runtime once the
+     * connectivity service was actually used.</p>
+     */
+    private Map<String, Object> extractEnvironmentCredentials() {
+        LOGGER.debug("Extracting the environment credentials for service '{}'", CONNECTIVITY);
+        ServiceBinding binding = DefaultServiceBindingAccessor.getInstance().getServiceBindings().stream()
+                .filter(b -> CONNECTIVITY.equalsIgnoreCase(b.getServiceName().orElse(null)))
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException(
+                        "No '" + CONNECTIVITY + "' service binding found. "
+                                + "Bind the connectivity service to the application before sending mail to on-premise hosts."));
+        return binding.getCredentials();
+    }
+
+    private static String stringValue(Map<String, Object> credentials, String key) {
+        Object value = credentials.get(key);
+        if (value == null) {
+            throw new IllegalStateException(
+                    "Connectivity service binding is missing required credential '" + key + "'");
+        }
+        return value.toString();
     }
 
     private void executeSOCKS5InitialRequest(OutputStream outputStream) throws IOException {
@@ -149,18 +167,18 @@ public class ConnectivitySocks5ProxySocket extends Socket {
         }
     }
 
-    private void executeSOCKS5AuthenticationRequest(OutputStream outputStream) throws IOException {
+    private void executeSOCKS5AuthenticationRequest(OutputStream outputStream, Map<String, Object> credentials) throws IOException {
         LOGGER.debug("Executing the SOCKS5 authentication request");
-        byte[] authenticationRequest = createJWTAuthenticationRequest();
+        byte[] authenticationRequest = createJWTAuthenticationRequest(credentials);
         outputStream.write(authenticationRequest);
 
         assertAuthenticationResponse();
     }
 
-    private byte[] createJWTAuthenticationRequest() throws IOException {
+    private byte[] createJWTAuthenticationRequest(Map<String, Object> credentials) throws IOException {
         LOGGER.debug("Creating the JWT authentication request");
         ByteArrayOutputStream byteArraysStream = new ByteArrayOutputStream();
-        String jwtToken=getAuthnToken();
+        String jwtToken = getAuthnToken(credentials);
         try {
             byteArraysStream.write(SOCKS5_JWT_AUTHENTICATION_METHOD_VERSION);
             byteArraysStream.write(ByteBuffer.allocate(4).putInt(jwtToken.getBytes().length).array());

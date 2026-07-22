@@ -30,8 +30,7 @@ These recipes have no required configuration options and can be activated by add
 ```sh
 mvn -U org.openrewrite.maven:rewrite-maven-plugin:run \
     -Drewrite.recipeArtifactCoordinates=org.openrewrite.recipe:rewrite-migrate-java:RELEASE \
-    -Drewrite.activeRecipes=org.openrewrite.java.migrate.UpgradeToJava25 \
-    -Drewrite.activeRecipes=org.openrewrite.java.migrate.jakarta.JakartaEE10 \
+    -Drewrite.activeRecipes=org.openrewrite.java.migrate.UpgradeToJava25,org.openrewrite.java.migrate.jakarta.JakartaEE10 \
     -Drewrite.exportDatatables=true
 ```
 
