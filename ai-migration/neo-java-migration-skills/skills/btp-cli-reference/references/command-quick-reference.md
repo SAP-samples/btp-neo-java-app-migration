@@ -50,8 +50,8 @@ All commands in one table. Use `btp --format json <command>` for scripting.
 | `btp create security/role-collection "<name>" --description "<desc>"` | Create role collection |
 | `btp update security/role-collection "<name>" --description "<desc>"` | Update description |
 | `btp delete security/role-collection "<name>"` | Delete role collection |
-| `btp add security/role --role-collection "<rc>" --role-name "<r>" --app-id "<appid>" --role-template "<tmpl>"` | Add XSUAA role-template to role collection |
-| `btp remove security/role --role-collection "<rc>" --role-name "<r>" --app-id "<appid>" --role-template "<tmpl>"` | Remove role-template from role collection |
+| `btp add security/role "<r>" --to-role-collection "<rc>" --of-app "<appid>" --of-role-template "<tmpl>"` | Add XSUAA role-template to role collection |
+| `btp remove security/role "<r>" --from-role-collection "<rc>" --of-app "<appid>" --of-role-template "<tmpl>"` | Remove role-template from role collection |
 | `btp list security/user` | List users in subaccount |
 | `btp get security/user <email>` | Show user details |
 | `btp create security/user <email> [--of-idp <origin>]` | Add user to subaccount |
