@@ -174,11 +174,11 @@ Add both destination and connectivity services to `mtad.yaml`:
 modules:
   - name: ${app-name}
     type: java.tomcat
-    path: target/${app-name}.war
+    path: target/<artifactId>.war
     parameters:
       buildpack: sap_java_buildpack_jakarta
-      disk-quota: 512MB
-      memory: 512MB
+      disk-quota: 1024M
+      memory: 1024M
     properties:
       ENABLE_SECURITY_JAVA_API_V2: true
       SET_LOGGING_LEVEL: 'ROOT: INFO'
