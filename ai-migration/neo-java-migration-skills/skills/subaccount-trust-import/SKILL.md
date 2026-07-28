@@ -134,10 +134,9 @@ btp --format json list security/api-credential --subaccount "${CF_SUBACCOUNT_ID}
 **3b. Delete stale credential if it exists** (to ensure fresh secrets):
 
 ```bash
-btp delete security/api-credential \
-  --name migration-api-credential \
+btp delete security/api-credential migration-api-credential \
   --subaccount "${CF_SUBACCOUNT_ID}" \
-  --force 2>/dev/null || true
+  --confirm true 2>/dev/null || true
 ```
 
 **3c. Create a fresh credential:**
@@ -364,16 +363,15 @@ Save to `.migration/neo-trust-import-report.json` using the Write tool:
 Delete the temporary API credential created in Step 3:
 
 ```bash
-btp delete security/api-credential \
-  --name migration-api-credential \
+btp delete security/api-credential migration-api-credential \
   --subaccount "${CF_SUBACCOUNT_ID}" \
-  --force
+  --confirm true
 ```
 
 Inform the user: "Temporary XSUAA API credentials have been deleted."
 
 If deletion fails, warn the user:
-> "Warning: Could not delete the temporary API credential `migration-api-credential`. Please delete it manually in BTP Cockpit → subaccount → Security → API credentials, or run: `btp delete security/api-credential --name migration-api-credential --subaccount ${CF_SUBACCOUNT_ID} --force`"
+> "Warning: Could not delete the temporary API credential `migration-api-credential`. Please delete it manually in BTP Cockpit → subaccount → Security → API credentials, or run: `btp delete security/api-credential migration-api-credential --subaccount ${CF_SUBACCOUNT_ID} --confirm true`"
 
 ## Step 9: Display Summary
 
