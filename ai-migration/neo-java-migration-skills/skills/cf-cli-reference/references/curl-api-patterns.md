@@ -109,7 +109,7 @@ cf curl "/v3/apps/$APP_GUID/environment_variables"
 {
   "var": {
     "ENABLE_SECURITY_JAVA_API_V2": "true",
-    "JBP_CONFIG_COMPONENTS": "jres: ['com.sap.xs.java.buildpack.jdk.SAPMachineJDK']",
+    "JBP_CONFIG_COMPONENTS": "jres: ['com.sap.xs.java.buildpack.jre.SAPMachineJRE']",
     "TARGET_RUNTIME": "tomcat"
   }
 }
