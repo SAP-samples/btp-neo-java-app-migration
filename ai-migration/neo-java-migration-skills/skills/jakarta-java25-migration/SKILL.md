@@ -141,6 +141,79 @@ This command will:
 - Update deprecated API usages
 - Migrate web.xml namespace declarations
 
+### Step 2b: Fix OpenRewrite side-effects in pom.xml
+
+OpenRewrite makes two changes that must be corrected after it runs:
+
+#### 2b-1: Restore `jakarta.servlet-api` to `provided` scope
+
+OpenRewrite replaces `javax.servlet:javax.servlet-api` with `jakarta.servlet:jakarta.servlet-api` but sets `<scope>compile</scope>`. This is wrong — `sap_java_buildpack_jakarta` provides the servlet API at runtime, so the scope must be `provided`. If left as `compile`, the servlet API JAR is packaged into the WAR and conflicts with the buildpack's version, causing all servlets to return 404 after a successful deploy.
+
+**Detect and fix:**
+
+```bash
+# Check if scope was set to compile
+grep -A4 "jakarta.servlet-api" pom.xml | grep "compile"
+```
+
+If the above returns a result, change the scope:
+
+```xml
+<!-- WRONG — causes 404 after deploy -->
+<dependency>
+    <groupId>jakarta.servlet</groupId>
+    <artifactId>jakarta.servlet-api</artifactId>
+    <version>6.0.0</version>
+    <scope>compile</scope>
+</dependency>
+<!-- Change <scope>compile</scope> to <scope>provided</scope> — see CORRECT block below -->
+
+<!-- CORRECT -->
+<dependency>
+    <groupId>jakarta.servlet</groupId>
+    <artifactId>jakarta.servlet-api</artifactId>
+    <version>6.0.0</version>
+    <scope>provided</scope>
+</dependency>
+```
+
+> If `cf-tomcat-bom` is imported in `<dependencyManagement>`, the version tag can be omitted — the BOM manages it.
+
+#### 2b-2: Replace `javax.servlet:jstl` with Jakarta JSTL (Conditional)
+
+OpenRewrite does NOT migrate the old JSTL library. If `javax.servlet:jstl` is present in pom.xml, it must be replaced with the Jakarta EE 10 compatible version.
+
+**Detect:**
+
+```bash
+grep -B2 "jstl" pom.xml | grep "javax.servlet"
+```
+
+If the above returns a result, replace the dependency:
+
+**Before:**
+```xml
+<dependency>
+    <groupId>javax.servlet</groupId>
+    <artifactId>jstl</artifactId>
+    <version>1.2</version>
+</dependency>
+```
+
+**After:**
+```xml
+<dependency>
+    <groupId>jakarta.servlet.jsp.jstl</groupId>
+    <artifactId>jakarta.servlet.jsp.jstl-api</artifactId>
+    <version>3.0.0</version>
+</dependency>
+<dependency>
+    <groupId>org.glassfish.web</groupId>
+    <artifactId>jakarta.servlet.jsp.jstl</artifactId>
+    <version>3.0.1</version>
+</dependency>
+```
+
 ### Step 3: Handle OpenCMIS Caveat
 
 > **Important:** The `org.apache.chemistry.opencmis` libraries have NOT been migrated to Jakarta EE. If your application uses OpenCMIS (Document Management), you must exclude it from the Jakarta migration.
@@ -967,6 +1040,14 @@ mvn test
 ### Issue: EqualsVerifier fails with "Significant fields: equals does not use X" or "Equals is inherited directly from Object"
 **Cause:** EqualsVerifier 3.x is stricter about field usage and equals() inheritance.
 **Solution:** Suppress with `Warning.ALL_FIELDS_SHOULD_BE_USED` or `Warning.INHERITED_DIRECTLY_FROM_OBJECT` as appropriate.
+
+### Issue: All servlets return 404 after successful deploy — app starts but no routes respond
+**Cause:** OpenRewrite sets `jakarta.servlet-api` to `<scope>compile</scope>`. This packages the servlet API into the WAR, conflicting with the version provided by `sap_java_buildpack_jakarta`. Tomcat fails to register servlets correctly.
+**Solution:** See **Step 2b-1** above. Change `jakarta.servlet-api` scope from `compile` to `provided` in `pom.xml` and redeploy.
+
+### Issue: JSTL tags not rendering or ClassNotFoundException for javax.servlet.jsp.jstl
+**Cause:** OpenRewrite does not migrate `javax.servlet:jstl:1.2` — it remains in the WAR and conflicts with Jakarta EE 10.
+**Solution:** See **Step 2b-2** above. Replace `javax.servlet:jstl:1.2` with `jakarta.servlet.jsp.jstl-api:3.0.0` + `org.glassfish.web:jakarta.servlet.jsp.jstl:3.0.1`.
 
 ## Next Steps
 
