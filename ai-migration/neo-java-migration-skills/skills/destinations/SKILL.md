@@ -51,6 +51,21 @@ Before invoking this skill, ensure you have invoked:
 
 ## Transformation Steps
 
+### Step 0: Detect existing JSON and HTTP conventions
+
+Before generating any code, scan for existing library usage:
+
+```bash
+# JSON libraries
+grep -E "fasterxml\.jackson|com\.google\.code\.gson|org\.json|jakarta\.json" pom.xml
+grep -rl "ObjectMapper\|new Gson()\|new JSONObject\|Json\.create" --include="*.java" src/main/java/ 2>/dev/null | head -5
+
+# HTTP client libraries
+grep -E "httpclient|httpclient5|okhttp" pom.xml
+```
+
+**Rule:** Reuse what is found. Only introduce a new library if nothing is present. Default: SAP Cloud SDK `HttpClientAccessor` for HTTP (already present after `sdk-replacement`).
+
 ### Step 1: Remove Resource References from web.xml
 
 **Remove these from web.xml:**
