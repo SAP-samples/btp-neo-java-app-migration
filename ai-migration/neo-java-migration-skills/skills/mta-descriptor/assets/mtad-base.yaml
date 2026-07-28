@@ -16,7 +16,7 @@ parameters:
 modules:
   - name: ${app-name}
     type: java.tomcat
-    path: target/${app-name}.war
+    path: target/<artifactId>.war
     parameters:
       # Jakarta EE buildpack for Java 25 + Jakarta EE 10
       buildpack: sap_java_buildpack_jakarta
