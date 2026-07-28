@@ -253,6 +253,15 @@ public class KeyStoreServlet extends HttpServlet {
     }
 
     @Override
+    public void destroy() {
+        // Release the mTLS private key when the servlet is taken out of service.
+        // CredStoreClient holds the key for its whole lifetime (the SSLContext
+        // reuses it across requests), so it must only be destroyed here — never
+        // per request — otherwise subsequent mTLS handshakes fail.
+        credStoreClient.close();
+    }
+
+    @Override
     protected void doGet(HttpServletRequest request, HttpServletResponse response) throws IOException {
         String alias = request.getParameter(PARAM_ALIAS);
         String namespace = request.getParameter(PARAM_NAMESPACE);
