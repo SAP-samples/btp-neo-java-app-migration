@@ -188,6 +188,21 @@ See [assets/xs-app.json](assets/xs-app.json) for a complete template:
 
 ### Step 5: Update User Access Code
 
+#### Neo UserProvider → CF XSUAA Token/TokenClaims mapping
+
+| Neo `UserProvider` / `User` API | CF XSUAA equivalent |
+|----------------------------------|---------------------|
+| `user.getName()` | `principal.getName()` — returns `user_uuid` (IAS) or `user_name` (XSUAA) |
+| `user.getAttribute("email")` | `token.getClaimAsString(TokenClaims.EMAIL)` |
+| `user.getAttribute("firstname")` | `token.getClaimAsString(TokenClaims.GIVEN_NAME)` |
+| `user.getAttribute("lastname")` | `token.getClaimAsString(TokenClaims.FAMILY_NAME)` |
+| `user.getAttribute("displayName")` | `token.getClaimAsString(TokenClaims.SAP_GLOBAL_USER_DISPLAY_NAME)` |
+| `user.getId()` (unique ID) | `token.getClaimAsString(TokenClaims.SAP_GLOBAL_USER_ID)` |
+| `request.isUserInRole("Admin")` | `request.isUserInRole("Admin")` — unchanged, maps to XSUAA scope |
+| Neo tenant / account name | `token.getClaimAsString(TokenClaims.SAP_GLOBAL_ZONE_ID)` |
+| `user.getAttribute("logon_name")` | `token.getClaimAsString(TokenClaims.USER_NAME)` |
+| XSUAA scopes list | `token.getClaimAsStringList(TokenClaims.XSUAA.SCOPES)` — XSUAA-specific, not available for IAS tokens |
+
 **Before (Neo):**
 ```java
 import com.sap.security.um.user.UserProvider;
@@ -199,25 +214,62 @@ private UserProvider userProvider;
 public void doGet(HttpServletRequest request, HttpServletResponse response) {
     User user = userProvider.getUser(request);
     String userName = user.getName();
+    String email = user.getAttribute("email");
+    String firstName = user.getAttribute("firstname");
     boolean isAdmin = request.isUserInRole("Admin");
 }
 ```
 
 **After (Cloud Foundry — in JAX-RS endpoints or servlets):**
 ```java
+import com.sap.cloud.security.token.SecurityContext;
 import com.sap.cloud.security.token.Token;
 import com.sap.cloud.security.token.TokenClaims;
+import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 
-public void doGet(HttpServletRequest request, HttpServletResponse response) {
-    // Get user from JWT token
-    java.security.Principal principal = request.getUserPrincipal();
-    String userName = principal != null ? principal.getName() : "anonymous";
+import java.io.IOException;
+import java.security.Principal;
+import java.util.List;
 
-    // Check role (scope)
-    boolean hasScope = request.isUserInRole("Everyone");
+public void doGet(HttpServletRequest request, HttpServletResponse response)
+        throws ServletException, IOException {
+
+    // 1. Basic identity — works with servlet security constraint in web.xml
+    Principal principal = request.getUserPrincipal();
+    if (principal == null) {
+        response.sendError(HttpServletResponse.SC_UNAUTHORIZED);
+        return;
+    }
+    String userName = principal.getName();  // user_uuid or user_name depending on IdP
+
+    // 2. Read claims from the JWT token for richer user attributes
+    Token token = SecurityContext.getToken();
+    if (token != null) {
+        String email      = token.getClaimAsString(TokenClaims.EMAIL);
+        String firstName  = token.getClaimAsString(TokenClaims.GIVEN_NAME);
+        String lastName   = token.getClaimAsString(TokenClaims.FAMILY_NAME);
+        String userId     = token.getClaimAsString(TokenClaims.SAP_GLOBAL_USER_ID);
+        String logonName  = token.getClaimAsString(TokenClaims.USER_NAME);
+
+        // XSUAA scopes — only available for XSUAA tokens, null for IAS tokens
+        List<String> scopes = token.getClaimAsStringList(TokenClaims.XSUAA.SCOPES);
+
+        // Tenant (zone ID) — identifies the subaccount
+        String zoneId = token.getClaimAsString(TokenClaims.SAP_GLOBAL_ZONE_ID);
+    }
+
+    // 3. Role / scope check — unchanged from Neo
+    boolean isAdmin = request.isUserInRole("Admin");
 }
 ```
+
+> **Why `SecurityContext.getToken()`?** The SAP Java Buildpack's `XSSecurityAuthenticator` Catalina valve validates the JWT and stores the parsed `Token` object in a thread-local via `SecurityContext`. This is the correct and recommended way to access the token. `request.getAttribute(Token.class.getName())` does NOT work in this context.
+
+> **`Token` vs `Principal`:** `request.getUserPrincipal().getName()` is sufficient for identifying the user. Only reach for `Token` when you need claims that are not exposed through the standard servlet API — email, given name, family name, zone ID.
+
+> **Null safety:** `token.getClaimAsString(...)` returns `null` if the claim is absent (e.g., the IdP did not include it). Always null-check before use in production code.
 
 ### Step 6: Create MTA Descriptor with Approuter
 
@@ -401,7 +453,7 @@ For scenarios requiring Basic Authentication (e.g., API access), see [references
 
 ### Issue: isUserInRole() returns false in @Stateless EJBs on TomEE — user has role but gets AuthorizationException
 **Cause:** First verify this is not the missing security constraint issue above (check if `getUserPrincipal()` returns `null`). If the principal IS set but `isUserInRole()` still returns `false`: `@Context HttpServletRequest` (JAX-RS injection) does not carry the XSUAA security context when used in `@Stateless` or `@Singleton` EJBs that are not JAX-RS resources. The request object is a CXF-internal wrapper that doesn't delegate `isUserInRole()` to the Catalina/XSUAA security realm. `SessionContext.isCallerInRole()` also fails because TomEE's `OpenEJBSecurityListener` does not fully propagate XSUAA roles to the OpenEJB security context. This is commonly seen in CDI producer beans or service provider EJBs that check roles before returning a service implementation.
-**Solution:** See **Step 7** above (TomEE variant). Replace `@Context` with `@Inject` for `HttpServletRequest`. CDI injection provides a request-scoped proxy that delegates to the real Catalina request with the XSUAA security context. Both `isUserInRole()` and `getUserPrincipal()` then work correctly. See also the **tomee-runtime** skill for details.
+**Solution:** Replace `@Context` with `@Inject` for `HttpServletRequest`. CDI injection provides a request-scoped proxy that delegates to the real Catalina request with the XSUAA security context. Both `isUserInRole()` and `getUserPrincipal()` then work correctly. See also the **tomee-runtime** skill for details.
 
 ## Next Steps
 
