@@ -101,13 +101,15 @@ Save the paths to `.migration/cf-migration-config.json` (create or update the fi
 </properties>
 ```
 
-> **Pin the runtime JRE explicitly.** `sap_java_buildpack_jakarta` supports SapMachine
-> 17, 21, and 25, but its implicit JRE choice changes over time — never rely on it.
-> Always pin Java 25 in your `mtad.yaml` (or `manifest.yml`) so the runtime matches the
-> compile target you set above; otherwise Tomcat fails to load the servlet with
-> `java.lang.UnsupportedClassVersionError: ... class file version 69.0, this version of the
-> Java Runtime only recognizes class file versions up to N.0` and every request returns
-> HTTP 500. The deployed module **must** include:
+> 🛑 **HARD RULE — pin the runtime JRE in the mtad, or the app 500s on every request.**
+> You just set `maven.compiler.target` to 25, so the WAR is Java 25 bytecode (class
+> file version 69). `sap_java_buildpack_jakarta`'s **default** JRE is NOT 25 (it is
+> currently 21) — if you do not pin it, Tomcat cannot load your servlets and fails with
+> `java.lang.UnsupportedClassVersionError: ... class file version 69.0, this version of
+> the Java Runtime only recognizes class file versions up to 65.0`, marks the servlet
+> unavailable, and **every request returns HTTP 500** (the app still shows `running 1/1`,
+> so this is easy to miss until an integration test hits it). The deployed module's
+> `properties:` **MUST** include BOTH env vars:
 >
 > ```yaml
 > properties:
@@ -115,9 +117,12 @@ Save the paths to `.migration/cf-migration-config.json` (create or update the fi
 >   JBP_CONFIG_SAP_MACHINE_JRE: '{ version: 25.+ }'
 > ```
 >
-> The `mta-descriptor` skill's `mtad-base.yaml` template already sets these — keep them.
-> Rule of thumb: **`maven.compiler.target` must equal the major version in
-> `JBP_CONFIG_SAP_MACHINE_JRE`.**
+> The `mta-descriptor` skill's `mtad-base.yaml` template already sets these — if you
+> start from it, keep them; if you hand-write the mtad, add them.
+>
+> ✅ **After writing the mtad, verify:** `grep JBP_CONFIG_SAP_MACHINE_JRE <mtad>` must
+> return the line above. Rule of thumb: **`maven.compiler.target` must equal the major
+> version in `JBP_CONFIG_SAP_MACHINE_JRE`** (both 25).
 
 ### Step 2: Run OpenRewrite Migration
 
@@ -372,6 +377,50 @@ If the dependency exists with `<scope>provided</scope>`, **remove the scope** (o
 ```
 
 > **Note:** This applies specifically when deploying to `sap_java_buildpack_jakarta`. Other application servers (e.g., full Jakarta EE servers like TomEE) may provide this API, but the SAP Java Buildpack with Tomcat does not.
+
+#### 6d-jaxrs: Package JAX-RS (Jersey) at RUNTIME scope
+
+> 🛑 **HARD RULE — a JAX-RS app must package its JAX-RS API + provider into the
+> WAR.** If the app has a `jakarta.ws.rs` (or migrated `javax.ws.rs`) resource —
+> a class annotated `@Path`, or a Jersey/CXF servlet in `web.xml` — then the WAR
+> **must** contain the JAX-RS API and a JAX-RS implementation at runtime. The
+> `sap_java_buildpack_jakarta` Tomcat does **not** provide JAX-RS. If these are
+> missing (or at `provided` scope, or only assumed from a BOM without being
+> declared), the app stages fine but **crash-loops on startup**:
+>
+> ```
+> ClassNotFoundException: jakarta.ws.rs.ProcessingException
+> → A child container failed during start
+> → The required Server component failed to start so Tomcat is unable to start
+> ```
+>
+> (Observed on document-management, CI run 43876653 — the app had passed prior
+> runs, then the AI dropped these deps: a per-run regression this rule prevents.)
+>
+> **Required dependencies (compile/runtime scope — NOT `provided`):**
+> ```xml
+> <dependency>
+>     <groupId>jakarta.ws.rs</groupId>
+>     <artifactId>jakarta.ws.rs-api</artifactId>
+>     <version>4.0.0</version>
+> </dependency>
+> <dependency>
+>     <groupId>org.glassfish.jersey.containers</groupId>
+>     <artifactId>jersey-container-servlet-core</artifactId>
+>     <version>3.1.10</version>
+> </dependency>
+> <dependency>
+>     <groupId>org.glassfish.jersey.inject</groupId>
+>     <artifactId>jersey-hk2</artifactId>
+>     <version>3.1.10</version>
+> </dependency>
+> ```
+> Mirror the known-good `scenarios/document-management/cf/pom.xml`.
+>
+> ✅ **Cross-check (mandatory for any `@Path`/Jersey app):** after building,
+> `jar tf target/*.war | grep 'WEB-INF/lib/jakarta.ws.rs-api'` and
+> `... | grep 'WEB-INF/lib/jersey-'` must BOTH return a jar. If either is empty,
+> the dependency is missing or at `provided` scope — fix it before deploying.
 
 #### 6e: Update web.xml Servlet Configuration (if applicable)
 
