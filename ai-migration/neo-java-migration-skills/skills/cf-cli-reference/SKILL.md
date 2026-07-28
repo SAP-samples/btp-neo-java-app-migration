@@ -795,15 +795,13 @@ cf deploy [MTA_ARCHIVE_OR_DIRECTORY] [flags]
   --no-start                # Do not start apps after deployment
   --abort-on-error          # Abort on first error (default: rollback)
   -t <TIMEOUT>              # Overall deployment timeout in seconds
-  --version-rule LATEST|SAME_HIGHER|ALL  # MTA version check rule
+  --version-rule HIGHER|SAME_HIGHER|ALL  # MTA version check rule
   --delete-services         # Delete services removed from mtad.yaml
   --delete-service-keys     # Delete service keys removed from mtad.yaml
   --keep-files              # Keep uploaded files on server
-  --no-confirm              # Skip interactive confirmations
   -i <OPERATION_ID>         # Resume/act on existing MTA operation
   -a abort|retry|resume|monitor  # Action for existing operation
   --namespace <NS>          # Apply namespace prefix to MTA resources
-  --use-namespaces          # Enable namespace support
   --strategy blue-green     # Blue-green deployment
   --skip-idle-start         # (blue-green) Skip starting idle app
 
