@@ -34,8 +34,8 @@ Route different paths to different backend services:
             "authenticationType": "xsuaa"
         },
         {
-            "source": "^(/.*)",
-            "target": "$1",
+            "source": "^/(.*)$",
+            "target": "/$1",
             "destination": "ui-service",
             "authenticationType": "none"
         }
@@ -78,8 +78,8 @@ Serve static files directly from the approuter without proxying to a backend:
             "localDir": "webapp"
         },
         {
-            "source": "^(/.*)",
-            "target": "$1",
+            "source": "^/(.*)$",
+            "target": "/$1",
             "destination": "backend-api",
             "authenticationType": "xsuaa"
         }
