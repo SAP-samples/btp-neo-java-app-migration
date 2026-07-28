@@ -456,6 +456,15 @@ returning `Password retrieved successfully.` on 200.
 These are real failure modes we have hit on this codebase. The cures are listed
 in roughly the order you would try them.
 
+### Common runtime errors → root cause
+
+| Runtime error | Root cause | Fix |
+|---|---|---|
+| `NoClassDefFoundError: com/sap/cloud/security/...` | `java-api` or security library not packaged in WAR | Remove `<scope>provided</scope>` from the security dep in `pom.xml` |
+| `NullPointerException` in `CredStoreClient` | `VCAP_SERVICES` env var not set — app not bound to credstore service | Check `cf env <app>` — bind the credstore service instance |
+| `401 Unauthorized` from credstore REST API | mTLS certificate not passed correctly — using plain HTTP client instead of mTLS | Ensure the client uses the certificate and key from `VCAP_SERVICES.credstore[0].credentials` |
+| `404 Not Found` from credstore REST API | Namespace or alias does not exist | Create namespace/alias via BTP Cockpit or credstore REST API before the app tries to read it |
+
 ### `java.lang.UnsupportedClassVersionError: ... class file version 69.0, this version of the Java Runtime only recognizes class file versions up to 65.0`
 
 **Symptom:** App deploys and starts, but every request hits HTTP 500 (first request)

@@ -51,6 +51,21 @@ Before invoking this skill, ensure you have invoked:
 
 ## Transformation Steps
 
+### Step 0: Detect existing JSON and HTTP conventions
+
+Before generating any code, scan for existing library usage:
+
+```bash
+# JSON libraries
+grep -E "fasterxml\.jackson|com\.google\.code\.gson|org\.json|jakarta\.json" pom.xml
+grep -rl "ObjectMapper\|new Gson()\|new JSONObject\|Json\.create" --include="*.java" src/main/java/ 2>/dev/null | head -5
+
+# HTTP client libraries
+grep -E "httpclient|httpclient5|okhttp" pom.xml
+```
+
+**Rule:** Reuse what is found. Only introduce a new library if nothing is present. Default: SAP Cloud SDK `HttpClientAccessor` for HTTP (already present after `sdk-replacement`).
+
 ### Step 1: Remove Resource References from web.xml
 
 **Remove these from web.xml:**
@@ -211,7 +226,30 @@ ProxyType proxyType = destination.asHttp().getProxyType();
 boolean isOnPremise = proxyType == ProxyType.ON_PREMISE;
 ```
 
-### Step 5: Update MTA Descriptor
+### Step 5: Add runtime dependency to pom.xml
+
+The SAP Cloud SDK's `DestinationAccessor` requires `connectivity-destination-service` on the runtime classpath. Without it the SDK compiles fine but throws `DestinationNotFoundException` for every destination at runtime.
+
+Check if it is already present:
+
+```bash
+grep -q "connectivity-destination-service" pom.xml && echo "already present" || echo "MISSING — will add"
+```
+
+If missing, add it to the `<dependencies>` section of `pom.xml`:
+
+```xml
+<!-- Required at runtime — DestinationAccessor fails without this -->
+<dependency>
+    <groupId>com.sap.cloud.sdk.cloudplatform</groupId>
+    <artifactId>connectivity-destination-service</artifactId>
+    <scope>runtime</scope>
+</dependency>
+```
+
+> Add this inside the existing `<dependencies>` block, alongside other SAP Cloud SDK dependencies added by the `sdk-replacement` skill. No version needed — it is managed by `sdk-modules-bom`.
+
+### Step 6: Update MTA Descriptor
 
 Add destination service to `mtad.yaml`:
 
@@ -238,7 +276,7 @@ resources:
       service-plan: lite
 ```
 
-### Step 6: Create Destinations in BTP Cockpit
+### Step 7: Create Destinations in BTP Cockpit
 
 Create destinations via BTP Cockpit or programmatically:
 
@@ -275,6 +313,21 @@ curl -X POST \
 ## Configuration Files
 
 No new configuration files in the application. Destinations are managed in BTP Cockpit.
+
+## Required Runtime Dependency
+
+The SAP Cloud SDK's `DestinationAccessor` requires `connectivity-destination-service` on the runtime classpath. Add it to `pom.xml`:
+
+```xml
+<!-- Required at runtime — DestinationAccessor fails with DESTINATION_NOT_FOUND without this -->
+<dependency>
+    <groupId>com.sap.cloud.sdk.cloudplatform</groupId>
+    <artifactId>connectivity-destination-service</artifactId>
+    <scope>runtime</scope>
+</dependency>
+```
+
+> **Why `runtime` scope?** The artifact contains the CF-specific `DestinationService` implementation that the SDK loads via ServiceLoader at runtime. The compilation succeeds without it (the API is in `scp-cf`), but `DestinationAccessor.getDestination()` silently falls back to a no-op loader and throws `DestinationNotFoundException` for every call.
 
 ## CF Services
 
@@ -319,22 +372,38 @@ curl "https://${app-url}/test/destination?name=my-destination"
 
 ## Common Issues
 
-### Issue: DestinationNotFoundException
-**Cause:** Destination not created or name mismatch.
-**Solution:**
-1. Verify destination exists in BTP Cockpit
-2. Check destination name matches exactly (case-sensitive)
-3. Ensure destination service is bound to application
+### Issue: `DestinationNotFoundException` — destination exists in BTP Cockpit but SDK throws anyway
+
+**Root cause:** Missing `connectivity-destination-service` runtime dependency in `pom.xml`. The SDK compiles without it (the API is in `scp-cf`), but at runtime the CF-specific destination loader is not on the classpath. `DestinationAccessor` falls back to a no-op loader and throws `DestinationNotFoundException` for every destination — even ones that exist.
+
+**Fix:** Add to `pom.xml`:
+```xml
+<dependency>
+    <groupId>com.sap.cloud.sdk.cloudplatform</groupId>
+    <artifactId>connectivity-destination-service</artifactId>
+    <scope>runtime</scope>
+</dependency>
+```
+
+Verify after redeploy:
+```bash
+# Should show the destination properties, not an error
+cf ssh <app-name> -c 'env | grep VCAP_SERVICES' | python3 -m json.tool | grep -A5 destination
+```
+
+### Issue: `DestinationNotFoundException` — name mismatch
+**Cause:** Destination name in code doesn't match exactly what is configured in BTP Cockpit (case-sensitive).
+**Fix:** Verify destination name in BTP Cockpit → Connectivity → Destinations. Names are case-sensitive.
 
 ### Issue: 403 Forbidden when accessing destination
-**Cause:** Authentication configuration issue.
-**Solution:** Check destination authentication settings and credentials.
+**Cause:** Authentication configuration issue in the destination definition.
+**Fix:** Check destination authentication settings and credentials in BTP Cockpit.
 
 ### Issue: Connection timeout
 **Cause:** Network or firewall issue.
-**Solution:**
-- For Internet destinations: Check URL is reachable
-- For OnPremise: Check Cloud Connector configuration (see connectivity-onpremise skill)
+**Fix:**
+- For Internet destinations: check URL is reachable from CF
+- For OnPremise: check Cloud Connector configuration (see `connectivity-onpremise` skill)
 
 ## API Reference
 
