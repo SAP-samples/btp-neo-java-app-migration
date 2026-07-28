@@ -242,8 +242,8 @@ modules:
       memory: 1024M
     properties:
       ENABLE_SECURITY_JAVA_API_V2: true
-      JBP_CONFIG_COMPONENTS: "jres: ['com.sap.xs.java.buildpack.jdk.SAPMachineJDK']"
-      JBP_CONFIG_SAP_MACHINE_JDK: "{ version: 25.+ }"
+      JBP_CONFIG_COMPONENTS: "jres: ['com.sap.xs.java.buildpack.jre.SAPMachineJRE']"
+      JBP_CONFIG_SAP_MACHINE_JRE: "{ version: 25.+ }"
       TARGET_RUNTIME: tomcat
       SET_LOGGING_LEVEL: 'ROOT: INFO'
     requires:
@@ -297,7 +297,7 @@ resources:
 > **Key points:**
 > - `path: target/<artifactId>.war` — read the `<artifactId>` from `pom.xml` and substitute it literally (the pom assets ship `maven-war-plugin` with `<warName>${project.artifactId}</warName>`, so the WAR is named after the artifactId). The app will serve at `/<artifactId>` — approuter destinations and tests must use that prefix. See `mta-descriptor` → "WAR filename rule" for the full guidance.
 > - `ENABLE_SECURITY_JAVA_API_V2: true` — required for XSUAA JWT validation via the `java-api` library.
-> - `JBP_CONFIG_COMPONENTS` + `JBP_CONFIG_SAP_MACHINE_JDK` — pin to SAPMachineJDK 17.
+> - `JBP_CONFIG_COMPONENTS` + `JBP_CONFIG_SAP_MACHINE_JRE` — pin to SAPMachineJRE 25.
 > - `provides` on the backend uses a custom property name (e.g. `neo-app-url`) and the approuter `requires` references it with `~{neo-app-url}`. The `url` shorthand only works if the `provides` block uses a property literally named `url`.
 > - `disk-quota: 1024M` minimum — 512M causes deployment failures with the SAP Java buildpack.
 
