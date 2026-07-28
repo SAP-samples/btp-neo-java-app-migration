@@ -112,7 +112,7 @@ Required `<build>` block in `pom.xml`:
 must print exactly `1`:
 
 ```bash
-grep -A 3 'maven-war-plugin' pom.xml | grep -c '<warName>${project.artifactId}</warName>'
+grep -A 10 'maven-war-plugin' pom.xml | grep -c '<warName>${project.artifactId}</warName>'
 ```
 
 If the count is `0`, the plugin is missing or `<warName>` is set to
