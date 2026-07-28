@@ -21,8 +21,8 @@ modules:
       # Jakarta EE buildpack for Java 25 + Jakarta EE 10
       buildpack: sap_java_buildpack_jakarta
       # Resource allocation
-      disk-quota: 512MB
-      memory: 512MB
+      disk-quota: 1024M
+      memory: 1024M
       # Optional: Enable SSH for debugging
       # enable-ssh: true
     properties:
