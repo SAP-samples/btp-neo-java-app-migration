@@ -392,9 +392,26 @@ resources:
 
 > **What this skill does NOT do:** create the credstore instance, define its
 > mTLS configuration, or seed namespaces/aliases. Those are one-time
-> per-space setup steps performed by the space operator (cockpit or `cf
-> create-service credstore standard credstore-service -c '{"authentication":{"type":"mtls"}}'`).
+> per-space setup steps performed by the space operator.
+>
+> **Before provisioning, ask the user:**
+> > "Is this a development/testing environment or a production environment?
+> > - For **development/testing**: use the `free` plan (10 credentials, 0.1 MB — sufficient for testing)
+> > - For **production**: use the `standard` plan (100,000 credentials, 100 MB)"
+>
+> Then provision accordingly:
+>
+> ```bash
+> # Development/testing:
+> cf create-service credstore free credstore-service -c '{"authentication":{"type":"mtls"}}'
+>
+> # Production:
+> cf create-service credstore standard credstore-service -c '{"authentication":{"type":"mtls"}}'
+> ```
+>
 > The migrated app only consumes credentials that are already there.
+>
+> **Plan guidance:** The `free` plan requires the Credential Store entitlement to be configured in the subaccount — add it via BTP Cockpit → Global Account → Entitlements → Add Service Plans → Credential Store → free.
 
 ### Step 5: Create Credentials in Credential Store
 
@@ -428,7 +445,8 @@ No new configuration files required. Credentials are accessed via service bindin
 
 | Service | Plan | Purpose |
 |---------|------|---------|
-| `credstore` | standard | Secure credential storage |
+| `credstore` | `free` | Secure credential storage (development and testing — 10 credentials, 0.1 MB) |
+| `credstore` | `standard` | Secure credential storage (production — 100,000 credentials, 100 MB) |
 
 ## Verification
 
@@ -522,10 +540,18 @@ not owned by this MTA. The result should look exactly like:
 ```
 
 See Step 4 for the full mtad context. If `credstore-service` doesn't exist in
-the space at all, ask the operator to provision it once (`cf create-service
-credstore standard credstore-service -c '{"authentication":{"type":"mtls"}}'`)
-and seed the required namespaces/aliases — this skill does NOT create credstore
-instances or credentials.
+the space at all, ask the user whether this is a development/testing or production
+environment, then provision accordingly:
+
+```bash
+# Development/testing:
+cf create-service credstore free credstore-service -c '{"authentication":{"type":"mtls"}}'
+
+# Production:
+cf create-service credstore standard credstore-service -c '{"authentication":{"type":"mtls"}}'
+```
+
+This skill does NOT create credstore instances or credentials.
 
 ### `Controller operation failed: 404 Not Found: Service instance credstore-service not found`
 
