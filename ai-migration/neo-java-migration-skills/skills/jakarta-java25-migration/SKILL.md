@@ -1105,6 +1105,64 @@ properties:
 
 > **Note:** `--add-opens` is a last-resort workaround. Prefer rewriting to the public API (idioms 1–3 above). Each `--add-opens` is a maintenance liability and may stop working in a future Java release.
 
+#### Affected idiom 5 — Spring/Hibernate framework annotation proxies (validated against real app)
+
+Spring and Hibernate read annotation metadata reflectively to resolve bean names, column mappings, and table names. On Java 8 this worked without restriction. On Java 25, any code that calls `Method.invoke` on a Spring or Hibernate annotation proxy throws `InaccessibleObjectException`.
+
+> **This is the idiom Centric encountered in their Spring/Hibernate Neo app.** The fix was validated on Java 25 with Spring 5.3 + Hibernate 5.6 running on `sap_java_buildpack_jakarta`.
+
+**Detect — Spring/Hibernate annotation proxy patterns:**
+
+```bash
+# Hibernate @Column / @Table / @Entity annotation reading via Method.invoke
+grep -rn "getAnnotation.*Column\|getAnnotation.*Table\|getAnnotation.*Entity" --include="*.java" src/main/java/
+grep -rn "getDeclaredMethod.*name\|getDeclaredMethod.*value\|getDeclaredMethod.*table" --include="*.java" src/main/java/
+
+# Spring @Service / @Component / @Repository / @Autowired annotation reading via Method.invoke
+grep -rn "getAnnotation.*Service\|getAnnotation.*Component\|getAnnotation.*Repository" --include="*.java" src/main/java/
+```
+
+**Before (breaks on Java 25) — reading Hibernate @Column name via Method.invoke:**
+```java
+Field field = Employee.class.getDeclaredField("firstName");
+Annotation annotation = field.getAnnotation(Column.class);
+Method method = annotation.annotationType().getDeclaredMethod("name");
+String columnName = (String) method.invoke(annotation);  // InaccessibleObjectException on Java 25
+```
+
+**After — use typed direct cast (PR #138 fix):**
+```java
+Field field = Employee.class.getDeclaredField("firstName");
+Column annotation = field.getAnnotation(Column.class);
+String columnName = annotation.name();  // direct call — no reflection needed
+```
+
+**Before (breaks on Java 25) — reading Spring @Service value via Method.invoke:**
+```java
+Annotation annotation = EmployeeService.class.getAnnotation(Service.class);
+Method method = annotation.annotationType().getDeclaredMethod("value");
+String beanName = (String) method.invoke(annotation);  // InaccessibleObjectException on Java 25
+```
+
+**After — use typed direct cast:**
+```java
+Service annotation = EmployeeService.class.getAnnotation(Service.class);
+String beanName = annotation.value();  // direct call — no reflection needed
+```
+
+**Same pattern applies to all Spring/Hibernate annotations:**
+
+| Framework | Annotation | Broken call | Fixed call |
+|-----------|-----------|-------------|------------|
+| Hibernate | `@Column` | `method.invoke(annotation)` to read `name()` | `((Column)annotation).name()` |
+| Hibernate | `@Table` | `method.invoke(annotation)` to read `name()` | `((Table)annotation).name()` |
+| Hibernate | `@Entity` | `method.invoke(annotation)` to read `name()` | `((Entity)annotation).name()` |
+| Spring | `@Service` | `method.invoke(annotation)` to read `value()` | `((Service)annotation).value()` |
+| Spring | `@Component` | `method.invoke(annotation)` to read `value()` | `((Component)annotation).value()` |
+| Spring | `@Repository` | `method.invoke(annotation)` to read `value()` | `((Repository)annotation).value()` |
+
+> **`setAccessible` on Hibernate entity fields (own class) is safe.** If your ORM code calls `setAccessible(true)` on fields of your own entity classes (e.g. for field-based injection), this still works on Java 25 — the restriction applies only to JDK-internal fields. Only `setAccessible` on `String.class`, `Integer.class`, or other JDK types is blocked.
+
 #### Verify
 
 ```bash
