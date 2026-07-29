@@ -428,6 +428,23 @@ grep -rh "com.sap.cloud.account\|com.sap.core.connectivity\|com.sap.security.um"
 ```
 Should return results that need to be replaced with SDK equivalents.
 
+### Step 12: Validate runtime classpath
+
+**MANDATORY — run this before moving to the next skill.**
+
+If the app uses `DestinationAccessor` (from the `destinations` skill or directly), `connectivity-destination-service` must be on the runtime classpath. The SDK compiles without it — the error only appears at runtime as `DestinationNotFoundException` for every destination, even ones that exist.
+
+Check whether it is already present (e.g. added by a previous migration run):
+
+```bash
+grep -q "connectivity-destination-service" pom.xml && echo "already present — skip" || echo "MISSING — will be added by destinations skill"
+```
+
+- If **already present** → nothing to do here.
+- If **MISSING** → do NOT add it now. The `destinations` skill owns this dependency and will add it in its Step 5. Adding it here and again there causes no harm (it is idempotent), but leaving it to `destinations` keeps ownership clear. Note this as a follow-up for the orchestrator.
+
+> **Why not add it here?** `sdk-replacement` is a dependency-management skill — it replaces Neo SDK with SAP Cloud SDK. Whether the app actually uses destinations is not known until the `destinations` skill runs. Adding `connectivity-destination-service` here would be premature for apps that don't use destinations.
+
 ## Common Issues
 
 ### Issue: Missing dependency versions
@@ -453,6 +470,48 @@ Should return results that need to be replaced with SDK equivalents.
 ### Issue: REST API endpoints return 404 after deployment
 **Cause:** The CXF/JAX-RS servlet was declared in web.xml but the `<servlet-mapping>` was missing. Without a mapping, the servlet is registered but unreachable.
 **Solution:** See **Step 7** above. Add a `<servlet-mapping>` for the servlet (e.g., `<url-pattern>/rest/*</url-pattern>`).
+
+### Common runtime errors → root cause
+
+These errors appear at runtime (not at compile or deploy time) and are typically caused by missing `runtime`-scoped dependencies:
+
+| Runtime error | Root cause | Fix |
+|---|---|---|
+| `DestinationNotFoundException` for every destination | Missing `connectivity-destination-service` runtime dep | Add to `pom.xml` with `<scope>runtime</scope>` |
+| `NoClassDefFoundError: com/sap/cloud/sdk/...` | SDK module not packaged in WAR | Remove `<scope>provided</scope>` from the SDK dep |
+| `ServiceLoader: no provider found for DestinationService` | Same as above | Same fix |
+| `ClassCastException` on CF SDK types | Two versions of the same SDK artifact in the WAR | Run `mvn dependency:tree` and add exclusion for the older version |
+| `NullPointerException` in `DestinationAccessor.getDestination` | `VCAP_SERVICES` env var not set (app not bound to destination service) | Check `cf env <app>` — bind the destination service instance |
+
+### Post-migration runtime dependency validation
+
+Run this before `cf deploy` to catch missing runtime dependencies early:
+
+```bash
+# Build the WAR and check its contents
+mvn clean package -DskipTests -q
+
+WAR=$(find target -name "*.war" | head -1)
+echo "Checking WAR: $WAR"
+
+# Check connectivity-destination-service is packaged (required for DestinationAccessor)
+if jar tf "$WAR" | grep -q "connectivity-destination-service"; then
+  echo "OK: connectivity-destination-service found in WAR"
+else
+  echo "MISSING: connectivity-destination-service — add to pom.xml with <scope>runtime</scope>"
+  echo "  <dependency>"
+  echo "    <groupId>com.sap.cloud.sdk.cloudplatform</groupId>"
+  echo "    <artifactId>connectivity-destination-service</artifactId>"
+  echo "    <scope>runtime</scope>"
+  echo "  </dependency>"
+fi
+
+# Check for duplicate SAP Cloud SDK versions (classloading conflicts)
+mvn dependency:tree -q | grep "com.sap.cloud.sdk" | sort | uniq -d | \
+  awk '{print "WARNING: duplicate SDK artifact:", $0}'
+
+echo "Validation complete."
+```
 
 ## Next Steps
 
