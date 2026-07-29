@@ -16,6 +16,9 @@
         <test.framework.version>2.88.0</test.framework.version>
         <easymock.version>3.1</easymock.version>
         <httpunit.version>1.7.3</httpunit.version>
+        <nimbus-jose-jwt.version>9.40</nimbus-jose-jwt.version>
+        <bouncycastle.version>1.78.1</bouncycastle.version>
+        <jackson.version>2.17.2</jackson.version>
 
         <maven-surefire.version>3.5.0</maven-surefire.version>
         <maven-failsafe.version>3.5.0</maven-failsafe.version>
@@ -45,6 +48,26 @@
             <groupId>com.sap.jpaas.test.framework</groupId>
             <artifactId>com.sap.jpaas.test.framework.util</artifactId>
             <version>${test.framework.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <!-- Seeding the credential store before the tests run: JOSE (JWE) payload
+             construction + PEM key parsing + JSON. See PassStoreSeeder. -->
+        <dependency>
+            <groupId>com.nimbusds</groupId>
+            <artifactId>nimbus-jose-jwt</artifactId>
+            <version>${nimbus-jose-jwt.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.bouncycastle</groupId>
+            <artifactId>bcpkix-jdk18on</artifactId>
+            <version>${bouncycastle.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>${jackson.version}</version>
             <scope>test</scope>
         </dependency>
     </dependencies>

@@ -27,12 +27,18 @@ public class KeystoreIntegrationTest {
     private WebResponse response;
 
     @BeforeClass
-    public static void setupSuite() {
+    public static void setupSuite() throws Exception {
         // Get the URL of the deployed application
         serverUrl = System.getProperty(INTEGRATION_TEST_APP_URL);
         if (serverUrl == null) {
             throw new IllegalArgumentException(String.format("System property '%s' not set.", INTEGRATION_TEST_APP_URL));
         }
+
+        // Seed the credential store with the key the single-key test expects.
+        // Without this, retrieving a specific alias returns 404 (mapped to 500
+        // by the app) because the store is empty on a fresh deployment. No-op
+        // when CREDSTORE_BINDING is not provided.
+        CredStoreSeeder.ensureKeySeeded();
     }
 
     @Before

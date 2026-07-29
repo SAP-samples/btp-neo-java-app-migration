@@ -15,6 +15,9 @@
         <hamcrest-library.version>3.0</hamcrest-library.version>
         <junit.version>4.13.2</junit.version>
         <httpunit.version>1.7.3</httpunit.version>
+        <nimbus-jose-jwt.version>9.40</nimbus-jose-jwt.version>
+        <bouncycastle.version>1.78.1</bouncycastle.version>
+        <jackson.version>2.17.2</jackson.version>
 
         <maven-surefire.version>3.5.0</maven-surefire.version>
         <maven-failsafe.version>3.5.0</maven-failsafe.version>
@@ -38,6 +41,26 @@
             <groupId>org.httpunit</groupId>
             <artifactId>httpunit</artifactId>
             <version>${httpunit.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <!-- Seeding the credential store before the tests run: JOSE (JWE) payload
+             construction + PEM key parsing + JSON. See CredStoreSeeder. -->
+        <dependency>
+            <groupId>com.nimbusds</groupId>
+            <artifactId>nimbus-jose-jwt</artifactId>
+            <version>${nimbus-jose-jwt.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.bouncycastle</groupId>
+            <artifactId>bcpkix-jdk18on</artifactId>
+            <version>${bouncycastle.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>${jackson.version}</version>
             <scope>test</scope>
         </dependency>
     </dependencies>

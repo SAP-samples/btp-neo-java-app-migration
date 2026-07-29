@@ -30,6 +30,7 @@ public class PasswordStorageServlet extends HttpServlet {
         PrintWriter writer = response.getWriter();
 
         if (StringUtils.isBlank(alias) || StringUtils.isBlank(namespace)) {
+            response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
             writer.println("Alias and namespace must be provided as path parameters.");
             writer.flush();
             return;
@@ -43,6 +44,10 @@ public class PasswordStorageServlet extends HttpServlet {
             return;
         }
 
+        // Propagate the failure as a non-200 status so callers (and the
+        // integration test) can detect that retrieval did not succeed, rather
+        // than always returning 200 regardless of outcome.
+        response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
         writer.println("Failed to retrieve password.");
         writer.flush();
     }
