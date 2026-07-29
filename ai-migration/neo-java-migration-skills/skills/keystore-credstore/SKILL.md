@@ -337,6 +337,19 @@ protected void doGet(HttpServletRequest request, HttpServletResponse response) t
 
 ### Step 4: Update MTA Descriptor
 
+> 🛑 **HARD RULE — the credstore resource MUST be `org.cloudfoundry.existing-service`.**
+> Do **not** emit `type: org.cloudfoundry.managed-service` for credstore, and do
+> **not** add a `parameters.service: credstore` / `service-plan:` block. Getting
+> this wrong is the single most common failure of this migration:
+>
+> | If you emit… | What happens at `cf deploy` |
+> |---|---|
+> | `managed-service` (`service: credstore`) | Broker rejects it — `Service broker credstore failed with: Illegal parameters or arguments used` — because the mTLS `config` is set out-of-band, not in the MTA. Deploy fails. |
+> | `existing-service` ✅ | Binds to the operator-provisioned instance. Correct. |
+>
+> The credstore instance is created and mTLS-configured **outside** the MTA
+> (by the space operator, or by CI before deploy). The MTA only *binds* to it.
+
 ```yaml
 modules:
   - name: ${app-name}

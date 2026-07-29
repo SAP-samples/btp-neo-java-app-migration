@@ -301,6 +301,20 @@ Replace `length = N` with `columnDefinition = "NCLOB"` on every `@Lob` field whe
 
 > **Note:** `NCLOB` has no practical size limit on HANA Cloud and is the correct type for large text fields. Fields with `length <= 5000` (e.g., `@Column(length = 1024)`) can remain as `NVARCHAR` and do not need this change.
 
+> 🛑 **HARD RULE — a JPA/EJB app REQUIRES a HANA schema service. "No services
+> required" is wrong for any app with a `persistence.xml` or a JPA datasource.**
+> The `resources.xml` from Step 3 binds `jdbc/DefaultDB` to
+> `service=${service_name_for_DefaultDB}`. If the mtad does not bind a
+> `com.sap.xs.hana-schema` service (Steps 5–6), TomEE cannot initialise the
+> datasource / persistence unit at startup, and the app **stages successfully
+> but crashes on boot** (`cf deploy` → "Some instances have crashed", no useful
+> HTTP response). Steps 5 and 6 are **mandatory** whenever the app uses JPA —
+> do not skip them and do not declare "no services required".
+>
+> ✅ **Verify before deploy:** the mtad must contain a
+> `type: com.sap.xs.hana-schema` resource AND the module must `requires:` it.
+> `grep -q 'com.sap.xs.hana-schema' <mtad>` must succeed for a persistence app.
+
 ### Step 5: Create resource_configuration.yml
 
 Create `src/main/webapp/META-INF/sap_java_buildpack/config/resource_configuration.yml`:
@@ -312,6 +326,25 @@ tomee/webapps/ROOT/WEB-INF/resources.xml:
 ```
 
 > **Note:** The path is `tomee/webapps/ROOT/WEB-INF` instead of `tomcat/webapps/ROOT`.
+>
+> 🛑 **SUBSTITUTE `${app-name}` with the REAL app name — it is a placeholder, not
+> a literal.** This value MUST exactly equal the `hana-schema` resource name you
+> bind in the mtad (Step 6). If you leave it literal, the buildpack looks up a
+> service called `app-name-hana` that does not exist, logs
+> `Could not find service with name 'app-name-hana', known services
+> '[<real>-hana]'`, the JDBC pool fails to initialise, and the app **crashes on
+> startup**. Example for an app named `persistence-with-ejb`:
+>
+> ```yaml
+> ---
+> tomee/webapps/ROOT/WEB-INF/resources.xml:
+>   service_name_for_DefaultDB: persistence-with-ejb-hana
+> ```
+>
+> ✅ **Cross-check:** the value here must be identical to the `resources:` entry
+> `name:` in the mtad (Step 6). `grep service_name_for_DefaultDB
+> resource_configuration.yml` and `grep -A1 'type: com.sap.xs.hana-schema' mtad*`
+> must show the SAME service name.
 
 ### Step 6: Update MTA Descriptor
 

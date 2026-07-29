@@ -8,7 +8,9 @@ import jakarta.mail.MessagingException;
 import jakarta.mail.Session;
 import jakarta.mail.URLName;
 
-import com.sun.mail.smtp.SMTPTransport;
+// Angus Mail (Jakarta Mail 2.1, EE 10) is the runtime implementation — its
+// SMTP transport lives under org.eclipse.angus.mail.smtp, not com.sun.mail.smtp.
+import org.eclipse.angus.mail.smtp.SMTPTransport;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

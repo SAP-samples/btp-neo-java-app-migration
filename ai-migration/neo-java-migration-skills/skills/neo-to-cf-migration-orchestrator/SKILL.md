@@ -432,19 +432,28 @@ find . -name "pom.xml" -not -path "*/target/*" -exec grep -l -E "neo-java-web-ap
 
 #### Check: approuter-setup
 ```bash
-# Check for webapp directory (web-facing app)
-find . -path "*/webapp/*" -type f | head -5
+# (1) Served UI — static content the approuter would front. A bare web.xml
+#     does NOT count: a servlet that only returns JSON/text is API-only.
+find . -path "*/webapp/*" -type f \
+  \( -name "*.html" -o -name "*.css" -o -name "*.js" -o -name "*.jsp" \) | head -5
 
-# Check for HTML files
-find . -name "*.html" -path "*/webapp/*" | head -5
-
-# Check for web.xml (servlet-based app)
-find . -name "web.xml" -path "*/WEB-INF/*" | head -5
-
-# Check for authentication (approuter always needed if auth is present)
-find . -name "web.xml" -path "*/WEB-INF/*" -exec grep -l -E "<auth-method>|<security-constraint>" {} \;
+# (2) Authentication — approuter is needed to front XSUAA when auth is present.
+find . -name "web.xml" -path "*/WEB-INF/*" \
+  -exec grep -l -E "<auth-method>|<security-constraint>|<login-config>" {} \;
 ```
-**Detection:** If ANY command above returns output -> REQUIRED
+**Detection:** REQUIRED only if command (1) OR (2) returns output.
+
+> 🛑 **The presence of `web.xml` alone does NOT mean an approuter is needed.**
+> An API-only, no-auth backend (a servlet that returns JSON/text, no static UI,
+> no `<auth-method>`/`<security-constraint>`, no XSUAA) must **NOT** get an
+> approuter — adding one is actively harmful. The standard approuter's
+> `xs-app.json` binds XSUAA (`Cannot find service uaa`), and even an
+> auth-stripped approuter introduces a route/context-root mismatch that returns
+> **404 on every request** if its `xs-app.json` target doesn't exactly match the
+> backend's context root. The `document-management`, `mail`, and `persistence`
+> scenarios are exactly this API-only shape — a single `java.tomcat` module
+> bound directly to its services, **no `approuter/`, no `xs-app.json`**. See the
+> "When this skill does NOT apply" gate in `approuter-setup/SKILL.md`.
 
 #### Check: authentication-xsuaa
 ```bash
@@ -584,7 +593,7 @@ After scanning, create a summary. Mark `[x]` for every skill whose detection com
 | [x] jakarta-java25-migration *                           |
 | [x] sdk-replacement *                                    |
 | [?] dependency-compatibility (check: third-party libs?)  |
-| [?] approuter-setup (check: webapp/ or web.xml found?)   |
+| [?] approuter-setup (check: static UI OR auth? NOT web.xml)|
 | [?] authentication-xsuaa (check: auth-method found?)     |
 | [?] persistence-hana (check: DataSource found?)          |
 | [?] destinations (check: ConnectivityConfig found?)      |
@@ -637,9 +646,22 @@ Based on detection results, create an ordered plan:
 
 ### Step 2.2: User Approval
 
-Present the plan to the user and ask for approval before proceeding.
+Present the plan to the user.
 
-**Important:** Wait for user confirmation before executing the migration.
+> 🛑 **Do NOT stop and wait for approval in an automated / non-interactive run.**
+> When there is no interactive user to answer — i.e. you were invoked headless
+> (`claude -p`, CI, a pipeline, batch mode), or the invoking prompt tells you to
+> run autonomously / without confirmation — **render the plan and immediately
+> continue to Phase 3 execution.** Pausing to ask "Shall I proceed?" in that
+> mode hangs the run: the question is never answered, so execution stops after
+> planning and the migration produces an incomplete `cf-ai-migrated/` (a built
+> WAR but **no `mtad.yaml`** — the deploy then fails with "No MTA descriptor
+> found"). This is a real failure mode observed in CI (tomee, run 43871348).
+>
+> Only wait for explicit confirmation when you are in a genuinely interactive
+> session **and** the user has not already told you to proceed. When in doubt in
+> an automated context, proceed — the plan is already rendered above for the
+> record.
 
 ## Phase 3: Execution
 
@@ -1038,7 +1060,7 @@ so integration tests and approuter destinations must include the
 | jakarta-java25-migration | Java 25 + Jakarta EE 10 | javax.* imports, Java < 25 |
 | sdk-replacement | SAP Cloud SDK | neo-java-web-api dependency |
 | dependency-compatibility | Third-party lib fixes | Liquibase, Guice, POI, Flyway, etc. |
-| approuter-setup | Application Router | webapp/ dir, web.xml, HTML content |
+| approuter-setup | Application Router | served static UI (`webapp/*.html/.css/.js`) OR auth (`<auth-method>`/`<security-constraint>`) — **not** a bare `web.xml` |
 | authentication-xsuaa | XSUAA auth | FORM auth, security-constraint |
 | persistence-hana | HANA database | DataSource resource-ref |
 | destinations | Destination service | ConnectivityConfiguration |

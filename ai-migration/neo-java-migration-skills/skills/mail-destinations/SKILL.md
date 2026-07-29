@@ -72,28 +72,47 @@ Before invoking this skill, ensure you have invoked:
 
 Add to `pom.xml`:
 
+> 🛑 **HARD RULE — ship a Jakarta Mail *implementation*, not just the API.**
+> On Jakarta EE 10 / Java 25 (`sap_java_buildpack_jakarta`) the Jakarta Mail
+> **API** (`jakarta.mail:jakarta.mail-api`, often pulled transitively by an EE 10
+> BOM) contains only interfaces. Without a runtime **implementation** on the
+> classpath, the app builds and deploys fine but throws at the first send:
+> `java.lang.IllegalStateException: No provider of jakarta.mail.util.StreamProvider
+> was found` (HTTP 500). The implementation is **Angus Mail**
+> (`org.eclipse.angus:jakarta.mail`) — it registers the provider via
+> `META-INF/services`. Always declare the implementation explicitly (it brings
+> the API transitively), so the provider is packaged into the WAR:
+
 ```xml
 <properties>
-    <jakarta-mail-version>2.0.1</jakarta-mail-version>
-    <jakarta-activation-version>2.0.1</jakarta-activation-version>
+    <!-- Angus Mail is the Jakarta Mail 2.1 (EE 10) reference implementation.
+         It transitively provides the jakarta.mail-api and the StreamProvider. -->
+    <angus-mail-version>2.0.3</angus-mail-version>
+    <jakarta-activation-version>2.1.3</jakarta-activation-version>
 </properties>
 
 <dependencies>
-    <!-- Jakarta Mail API -->
+    <!-- Jakarta Mail IMPLEMENTATION (Angus Mail) — provides the API + the
+         runtime StreamProvider. Do NOT depend on jakarta.mail-api alone. -->
     <dependency>
-        <groupId>com.sun.mail</groupId>
+        <groupId>org.eclipse.angus</groupId>
         <artifactId>jakarta.mail</artifactId>
-        <version>${jakarta-mail-version}</version>
+        <version>${angus-mail-version}</version>
     </dependency>
 
-    <!-- Jakarta Activation (required for mail) -->
+    <!-- Jakarta Activation implementation (required for mail) -->
     <dependency>
-        <groupId>com.sun.activation</groupId>
-        <artifactId>jakarta.activation</artifactId>
+        <groupId>org.eclipse.angus</groupId>
+        <artifactId>angus-activation</artifactId>
         <version>${jakarta-activation-version}</version>
     </dependency>
 </dependencies>
 ```
+>
+> ✅ **After building the WAR, verify the impl is packaged:**
+> `jar tf target/*.war | grep -i 'angus-mail\|jakarta.mail'` must list the Angus
+> Mail jar under `WEB-INF/lib/`. If only `jakarta.mail-api-*.jar` is present, the
+> app will 500 at runtime with the StreamProvider error above.
 
 ### Step 3: Copy Mail Session Helper Classes
 

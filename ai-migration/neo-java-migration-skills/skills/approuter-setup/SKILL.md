@@ -1,6 +1,6 @@
 ---
 name: approuter-setup
-description: Invoke this skill to set up the SAP Application Router (approuter) for Cloud Foundry. Detects web-facing applications with webapp/ directory, web.xml, or HTML content. Creates the approuter directory with package.json, xs-app.json, and optional extended middleware for SAML2/Basic Auth handling.
+description: Invoke this skill to set up the SAP Application Router (approuter) for Cloud Foundry ONLY for apps that serve static UI (HTML/CSS/JS under webapp/) or require authentication (web.xml <auth-method>/<security-constraint>, or XSUAA). A bare web.xml on an API-only, no-auth backend (a servlet returning JSON/text) does NOT need an approuter — do not invoke this skill for it. Creates the approuter directory with package.json, xs-app.json, and optional extended middleware for SAML2/Basic Auth handling.
 disable-model-invocation: false
 allowed-tools: Read, Edit, Write, Bash, Grep, Glob
 ---
@@ -62,6 +62,39 @@ find . -name "*.html" -path "*/webapp/*" | head -5
 - "Set up approuter"
 - "Add application router"
 - "Configure approuter for my app"
+
+## When this skill does NOT apply — do not add an approuter
+
+> 🛑 **The presence of `web.xml` alone does NOT mean you need an approuter.**
+> An approuter's job is serving static UI content and/or fronting XSUAA
+> authentication. A **standalone, API-only backend with no authentication** does
+> not need one — and adding it is actively harmful: the standard approuter's
+> `xs-app.json` binds XSUAA, so the module fails to boot with
+> `Cannot find service uaa in environment: No service matches uaa`
+> (and `ias`), taking down an otherwise-working app.
+>
+> **Skip this skill (no approuter) when ALL of these hold:**
+> - No authentication: `web.xml` has no `<auth-method>` and no
+>   `<security-constraint>`, and there is no XSUAA `<resource-ref>`.
+> - No served UI: no `.html`/`.css`/`.js` under `webapp/` (a servlet that only
+>   returns JSON/text is API-only).
+> - The app is reached directly (e.g. a mail-sender, a REST/JDBC backend).
+>
+> In that case the migrated app is a single `java.tomcat` module bound directly
+> to whatever services it needs (destination, connectivity, credstore, …) —
+> **no `approuter/` module, no `xs-app.json`, no uaa/ias resources.** The
+> `mail`, `persistence`, and `document-management` scenarios are exactly this
+> shape (JSON/REST backends with a `web.xml` but no auth and no served UI).
+>
+> ⚠️ **If you add an approuter anyway, you own the route mapping.** The standard
+> `xs-app.json` rewrites the public path onto the backend destination. If the
+> WAR's context root is non-root (e.g. `document-management.war` serves at
+> `/document-management`, not `/`) and the `xs-app.json` route target does not
+> account for it, **every request 404s** — the approuter forwards `/ecm` to the
+> backend as `/document-management/ecm`, which does not exist. This is silent:
+> the app is healthy, the approuter is healthy, and every call returns 404.
+> Skipping the approuter entirely (the app is reached directly) avoids the
+> whole class of mismatch.
 
 ## Backend-only apps — XSUAA without approuter
 
