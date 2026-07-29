@@ -7,6 +7,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.net.ssl.SSLContext;
+import java.io.Closeable;
 import java.io.IOException;
 import java.net.HttpURLConnection;
 import java.net.URISyntaxException;
@@ -15,7 +16,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.security.GeneralSecurityException;
 
-public class CredStoreClient {
+public class CredStoreClient implements Closeable {
     private static final Logger logger = LoggerFactory.getLogger(CredStoreClient.class);
 
     private static final String CREDENTIALS_TYPE = "credentials";
@@ -73,9 +74,25 @@ public class CredStoreClient {
         } catch (URISyntaxException | IOException | InterruptedException e) {
             logger.error("Error retrieving {}: {}", type, e.getMessage(), e);
             return new CredStoreResponse(false, "Failed to retrieve " + type + ". " + e.getMessage());
-        } finally {
-            sslContextProvider.destroyPrivateKey();
-            logger.debug("Destroyed private key after request.");
         }
+        // NOTE: do NOT destroy the private key here. The SSLContext built in the
+        // constructor retains this key for the whole lifetime of the client
+        // (the servlet is a singleton, so the client and its SSLContext are
+        // reused across every request). Destroying the key after the first
+        // request breaks the mTLS handshake of every subsequent request to the
+        // credential store — which surfaced as an intermittent 500 on whichever
+        // endpoint happened to be called second. Key material is released when
+        // the client is closed; see close().
+    }
+
+    /**
+     * Releases the mTLS private key held by this client's SSLContext. Call once
+     * the client is no longer needed. After close() the client must not be used
+     * for further requests.
+     */
+    @Override
+    public void close() {
+        sslContextProvider.destroyPrivateKey();
+        logger.debug("Destroyed private key on client close.");
     }
 }

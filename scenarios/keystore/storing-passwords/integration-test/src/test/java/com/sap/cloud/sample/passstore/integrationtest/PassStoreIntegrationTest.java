@@ -31,12 +31,17 @@ public class PassStoreIntegrationTest {
      * to the local server as provided through Eclipse to run the integration test against.
      */
     @BeforeClass
-    public static void setupSuite() {
+    public static void setupSuite() throws Exception {
         // Get integration test server URL
         serverUrl = System.getProperty(INTEGRATION_TEST_APP_URL);
         if (serverUrl == null) {
             throw new IllegalArgumentException(String.format("System property '%s' not set.", INTEGRATION_TEST_APP_URL));
         }
+
+        // Seed the credential store with the password the test expects. On a
+        // fresh deployment the store is empty, so retrieval would fail. No-op
+        // when CREDSTORE_BINDING is not provided.
+        PassStoreSeeder.ensurePasswordSeeded();
     }
 
     /**
@@ -58,7 +63,11 @@ public class PassStoreIntegrationTest {
         WebRequest request = new GetMethodWebRequest(serverUrl + TEST_NAMESPACE_PARAMS);
         WebResponse response = wc.getResponse(request);
 
-        // Check that we could retrieve the password
+        // The servlet returns 200 only when the password was actually retrieved
+        // from the credential store (it returns 500 on failure). Assert both the
+        // status and the success message so the test verifies real retrieval
+        // rather than passing regardless of outcome.
         assertThat(response.getResponseCode(), is(equalTo(HttpServletResponse.SC_OK)));
+        assertThat(response.getText().contains("Password retrieved successfully."), is(true));
     }
 }

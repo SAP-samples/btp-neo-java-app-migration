@@ -8,14 +8,16 @@
     <version>1.0.0</version>
 
     <properties>
-        <sap.cloud.jdk.version>25</sap.cloud.jdk.version>
-        <slf4j.version>1.7.30</slf4j.version>
+        <maven.compiler.source>25</maven.compiler.source>
+        <maven.compiler.target>25</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
-        <hamcrest-library.version>1.3</hamcrest-library.version>
-        <junit.version>4.10</junit.version>
-        <test.framework.version>2.88.0</test.framework.version>
-        <easymock.version>3.1</easymock.version>
+        <hamcrest-library.version>3.0</hamcrest-library.version>
+        <junit.version>4.13.2</junit.version>
         <httpunit.version>1.7.3</httpunit.version>
+        <nimbus-jose-jwt.version>9.40</nimbus-jose-jwt.version>
+        <bouncycastle.version>1.78.1</bouncycastle.version>
+        <jackson.version>2.17.2</jackson.version>
 
         <maven-surefire.version>3.5.0</maven-surefire.version>
         <maven-failsafe.version>3.5.0</maven-failsafe.version>
@@ -41,10 +43,24 @@
             <version>${httpunit.version}</version>
             <scope>test</scope>
         </dependency>
+        <!-- Seeding the credential store before the tests run: JOSE (JWE) payload
+             construction + PEM key parsing + JSON. See PassStoreSeeder. -->
         <dependency>
-            <groupId>com.sap.jpaas.test.framework</groupId>
-            <artifactId>com.sap.jpaas.test.framework.util</artifactId>
-            <version>${test.framework.version}</version>
+            <groupId>com.nimbusds</groupId>
+            <artifactId>nimbus-jose-jwt</artifactId>
+            <version>${nimbus-jose-jwt.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.bouncycastle</groupId>
+            <artifactId>bcpkix-jdk18on</artifactId>
+            <version>${bouncycastle.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>${jackson.version}</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
