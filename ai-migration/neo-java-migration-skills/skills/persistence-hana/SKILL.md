@@ -55,6 +55,18 @@ Also required:
 
 ## Transformation Steps
 
+### Step 0: Detect existing JSON conventions
+
+Before generating any code, scan for existing JSON library usage:
+
+```bash
+# JSON libraries
+grep -E "fasterxml\.jackson|com\.google\.code\.gson|org\.json|jakarta\.json" pom.xml
+grep -rl "ObjectMapper\|new Gson()\|new JSONObject\|Json\.create" --include="*.java" src/main/java/ 2>/dev/null | head -5
+```
+
+**Rule:** Reuse what is found. Default if nothing found: `jakarta.json` (JSON-P) — already in `cf-tomcat-bom`, no extra dependency needed.
+
 ### Step 1: Remove Resource Reference from web.xml
 
 **Remove this from web.xml:**
@@ -106,11 +118,11 @@ version: 0.0.1
 modules:
   - name: ${app-name}
     type: java.tomcat
-    path: target/${app-name}.war
+    path: target/<artifactId>.war
     parameters:
       buildpack: sap_java_buildpack_jakarta
-      disk-quota: 512MB
-      memory: 512MB
+      disk-quota: 1024M
+      memory: 1024M
     properties:
       ENABLE_SECURITY_JAVA_API_V2: true
       SET_LOGGING_LEVEL: 'ROOT: INFO'

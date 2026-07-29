@@ -30,8 +30,8 @@
             "csrfProtection": false
         },
         {
-            "source": "^(/.*)",
-            "target": "$1",
+            "source": "^/(.*)$",
+            "target": "/$1",
             "destination": "<destination-name>",
             "authenticationType": "none",
             "csrfProtection": false

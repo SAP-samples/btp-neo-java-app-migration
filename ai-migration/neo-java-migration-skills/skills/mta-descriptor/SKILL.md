@@ -112,7 +112,7 @@ Required `<build>` block in `pom.xml`:
 must print exactly `1`:
 
 ```bash
-grep -A 3 'maven-war-plugin' pom.xml | grep -c '<warName>${project.artifactId}</warName>'
+grep -A 10 'maven-war-plugin' pom.xml | grep -c '<warName>${project.artifactId}</warName>'
 ```
 
 If the count is `0`, the plugin is missing or `<warName>` is set to
@@ -145,19 +145,7 @@ Why this matters in concrete terms:
   after the artifactId (e.g. `target/connectivity.war`). The descriptor
   must match what Maven actually writes, not a placeholder string.
 
-**Consequence to communicate downstream:** the SAP Java buildpack serves
-a WAR at the Tomcat context path derived from its filename. A WAR
-named `connectivity.war` is served at `/connectivity` — **not at `/`**.
-Integration tests that target the app and any approuter destinations
-must include the `/<artifactId>` prefix in their URLs. The
-`mta-descriptor` skill does not paper over this — it leaves the WAR
-naming aligned with `pom.xml` and surfaces the prefix in the deploy log.
-
-This is a deliberate choice. Previously the descriptor mandated
-`target/ROOT.war` to get `/`-served apps, which created the inverse
-failure mode whenever `pom.xml` didn't have `<warName>ROOT</warName>`
-(the more common case in practice). The current rule — descriptor
-follows pom — never has a mismatch.
+**Consequence to communicate downstream:** `sap_java_buildpack_jakarta` always serves the app at `/` (ROOT context). It additionally registers the app at `/<warName>/` only if `web.xml` has a servlet mapped to `url-pattern: /`. Integration tests and approuter destinations should use `/` — not `/<artifactId>/` — unless the app explicitly maps a default servlet.
 
 ### Template: Basic Application (mtad-base.yaml)
 
@@ -284,7 +272,7 @@ resources:
 
 ```
 
-> **Critical:** The Java backend `path` must point to the actual WAR file Maven produces — read the `<artifactId>` from `pom.xml` and substitute it literally (e.g. `path: target/connectivity.war` for a project whose `artifactId` is `connectivity`). See the "WAR filename rule" callout above this section. The app will serve at `/<artifactId>`; ensure tests and approuter destinations use that prefix.
+> **Critical:** The Java backend `path` must point to the actual WAR file Maven produces — read the `<artifactId>` from `pom.xml` and substitute it literally (e.g. `path: target/connectivity.war` for a project whose `artifactId` is `connectivity`). See the "WAR filename rule" callout above this section. Note: `sap_java_buildpack_jakarta` always serves the app at `/` — the WAR filename does not affect the runtime context path.
 
 > **Note on `type: nodejs` vs `type: approuter.nodejs`:** Use `type: nodejs` when deploying the approuter with your own `approuter/` directory and `package.json` (which is the standard pattern for migrated Neo applications). The type `approuter.nodejs` is for the "managed approuter" pattern which is used only in specific multi-tenant scenarios.
 
@@ -481,9 +469,7 @@ modules:
       disk-quota: 1024M            # Minimum 1GB — 512M causes deployment errors
 ```
 
-> **WAR naming:** The descriptor's `path:` must match exactly what Maven writes to `target/`. The pom templates ship `maven-war-plugin` with `<warName>${project.artifactId}</warName>`, so the WAR is named after the artifactId (e.g. `target/connectivity.war`). Open `pom.xml`, read the `<artifactId>` value, and write it literally into `mtad.yaml` — Maven property expressions like `${project.artifactId}` are NOT evaluated by `cf deploy` and will fail with "file path … not found".
->
-> **Side effect:** the SAP Java buildpack serves a WAR at the Tomcat context path matching its filename, so the app will be reachable at `/<artifactId>`, not `/`. Integration tests and approuter destinations must include that prefix.
+> **WAR naming:** The descriptor's `path:` must match exactly what Maven writes to `target/`. The pom templates ship `maven-war-plugin` with `<warName>${project.artifactId}</warName>`, so the WAR is named after the artifactId (e.g. `target/connectivity.war`). Open `pom.xml`, read the `<artifactId>` value, and write it literally into `mtad.yaml` — Maven property expressions like `${project.artifactId}` are NOT evaluated by `cf deploy` and will fail with "file path … not found". Note: `sap_java_buildpack_jakarta` always serves the app at `/` — use `/` in approuter targets and integration tests, not `/<artifactId>/`.
 
 ### 4. Add Required Services
 
@@ -545,24 +531,33 @@ python3 -c "import yaml; yaml.safe_load(open('mtad.yaml'))"
 
 After generating the `mtad.yaml`:
 
-### Build MTA Archive
-
-```bash
-# Build the MTA archive
-mbt build
-
-# This creates: mta_archives/my-app_1.0.0.mtar
-```
-
 ### Deploy to Cloud Foundry
 
-```bash
-# Deploy using MultiApps plugin
-cf deploy mta_archives/my-app_1.0.0.mtar
+#### Primary flow — `cf deploy .` (recommended)
 
-# Or deploy directly from current directory
-cf deploy .
+```bash
+# Deploy directly from current directory
+# cf deploy reads mtad.yaml and builds the MTA archive in-process
+cf deploy . -f
 ```
+
+> **This is the correct flow for migrated Neo applications.** This skill generates `mtad.yaml` (a deployment descriptor), which `cf deploy .` reads directly. All 8 reference scenarios use this command.
+
+#### CI/CD / archive flow — `mbt build` (requires extra step)
+
+If you need a versioned `.mtar` archive (e.g. for CI/CD pipelines or distributing to other teams), you must first manually create an `mta.yaml` source descriptor — `mbt build` requires it and will fail without it. This skill does **not** generate `mta.yaml`.
+
+```bash
+# 1. Manually create mta.yaml (not generated by this skill)
+# 2. Build the MTA archive
+mbt build
+# This creates: mta_archives/<app>_<version>.mtar
+
+# 3. Deploy the archive
+cf deploy mta_archives/*.mtar -f
+```
+
+> **`mta.yaml` vs `mtad.yaml`:** `mta.yaml` is a source descriptor read by `mbt build` to compile and package the app. `mtad.yaml` is a deployment descriptor read directly by `cf deploy`. They serve different purposes — having one does not substitute for the other.
 
 ### Verify Deployment
 
@@ -689,15 +684,15 @@ The Maven build step earlier in the pipeline reported `BUILD SUCCESS`. The build
 
 **Solution:** Open `pom.xml`, read the `<artifactId>` value, and substitute it literally into `mtad.yaml`'s `path:`. For a project whose `<artifactId>` is `connectivity`, the descriptor must say `path: target/connectivity.war` — not `target/${project.artifactId}.war`, not `target/ROOT.war`. After fixing the descriptor, re-run `cf deploy` (no rebuild needed).
 
-> **The app will serve at `/<artifactId>`, not `/`.** This is the deliberate consequence of leaving the WAR named after the artifactId. Integration tests and approuter destinations must include the `/<artifactId>` prefix in their URLs.
+> **Note:** `sap_java_buildpack_jakarta` always serves the app at `/` (ROOT context) — the WAR filename does not affect the runtime context path. Integration tests and approuter destinations should use `/`, not `/<artifactId>/`.
 
 ### Issue: 404 Not Found at runtime — app deployed but routes return 404
 
 **Symptom:** Deploy succeeded; the app starts; every request to `/<something>` returns 404. Logs show Tomcat started and the WAR loaded.
 
-**Cause:** The WAR is named `<artifactId>.war`, so the SAP Java buildpack serves it at the Tomcat context path `/<artifactId>` — not `/`. The 404 isn't a deployment bug; it's the request URL missing the context path prefix.
+**Cause:** `sap_java_buildpack_jakarta` deploys the WAR as ROOT context — the app is served at `/`, not at `/<artifactId>`. The 404 is likely caused by a missing servlet mapping in `web.xml`, a wrong security constraint, or approuter routes using `/<artifactId>/` as a target prefix.
 
-**Solution:** Update the caller (integration tests, approuter destinations, frontend code) to prefix request URLs with `/<artifactId>`. For example, if the app's `<artifactId>` is `connectivity` and a servlet is mapped at `/api/echo`, the deployed URL is `https://<route>/connectivity/api/echo`. The Tomcat access log (visible via `cf logs <app>`) shows the actual context path the WAR was deployed under.
+**Solution:** Check servlet mappings in `web.xml`. If using an approuter, verify that route targets do NOT include `/<artifactId>/` as a prefix — the app serves at `/` directly. Run `cf logs <app> --recent` to see which paths Tomcat is actually receiving.
 
 ### Issue: Routes quota exceeded
 
