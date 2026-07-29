@@ -28,14 +28,6 @@ public class KeyStoreServlet extends HttpServlet {
     }
 
     @Override
-    public void destroy() {
-        // Release the mTLS private key when the servlet is taken out of service.
-        // The client holds the key for its whole lifetime (the SSLContext reuses
-        // it across requests), so it is destroyed here rather than per request.
-        credStoreClient.close();
-    }
-
-    @Override
     protected void doGet(HttpServletRequest request, HttpServletResponse response) throws IOException {
         response.setContentType("text/html");
         response.setCharacterEncoding("UTF-8");
