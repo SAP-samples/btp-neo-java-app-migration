@@ -924,6 +924,125 @@ The `jaxb-api` artifact provides the `javax.xml.bind.*` interfaces and annotatio
 
 No new configuration files required for this skill.
 
+### Step 11: Deep Reflection Under Java 25 (Conditional)
+
+Java 25 tightens reflective access to JDK internals and annotation proxies. Code that calls `Method.invoke()` on annotation proxy objects, uses `setAccessible(true)` on JDK-internal fields, or relies on split-package reflective access will throw `InaccessibleObjectException` or `IllegalAccessException` at runtime — even if it compiled and ran fine on Java 8/11.
+
+> **This step is conditional.** Only apply if the detection check below returns results.
+
+#### Detect at-risk idioms
+
+```bash
+# Method.invoke on annotation proxies or arbitrary objects
+grep -rn "\.invoke(" --include="*.java" src/main/java/ src/test/java/
+
+# setAccessible — broad reflective access
+grep -rn "setAccessible(true)" --include="*.java" src/main/java/ src/test/java/
+
+# getDeclaredField / getDeclaredMethod — often paired with setAccessible
+grep -rn "getDeclaredField\|getDeclaredMethod" --include="*.java" src/main/java/ src/test/java/
+
+# --add-opens already present — signals prior workaround
+grep -rn "add-opens" pom.xml
+```
+
+Review each hit. Hits in **test code** are lower risk (tests run with the build JDK, not the buildpack runtime). Hits in **main code** are the ones that will break in production.
+
+#### Affected idiom 1 — `Method.invoke` on annotation proxies
+
+Annotation instances returned by reflection are JDK proxy objects. In Java 25, invoking their methods via `Method.invoke` requires the caller's module to have reflective access to `java.lang.reflect.Proxy` internals, which is no longer granted by default.
+
+**Before (breaks on Java 25):**
+```java
+Annotation annotation = MyClass.class.getAnnotation(MyAnnotation.class);
+Method method = annotation.annotationType().getDeclaredMethod("value");
+String value = (String) method.invoke(annotation);  // InaccessibleObjectException
+```
+
+**After — use `AnnotatedElement` API directly:**
+```java
+MyAnnotation annotation = MyClass.class.getAnnotation(MyAnnotation.class);
+String value = annotation.value();  // direct call — no reflection needed
+```
+
+If the annotation type is only known at runtime:
+
+```java
+Annotation annotation = MyClass.class.getAnnotation(annotationType);
+// Use annotationType().getMethod() + cast, or switch to MethodHandles:
+MethodHandles.Lookup lookup = MethodHandles.publicLookup();
+MethodHandle handle = lookup.findVirtual(
+    annotationType, "value", MethodType.methodType(String.class));
+String value = (String) handle.invoke(annotation);
+```
+
+#### Affected idiom 2 — `setAccessible(true)` on JDK-internal fields/methods
+
+**Before (breaks on Java 25):**
+```java
+Field field = String.class.getDeclaredField("value");
+field.setAccessible(true);  // InaccessibleObjectException on JDK internals
+byte[] chars = (byte[]) field.get(someString);
+```
+
+**After — use the public API instead:**
+```java
+// For String internals: just use the public API
+byte[] chars = someString.getBytes(StandardCharsets.UTF_8);
+```
+
+For your own classes (non-JDK), `setAccessible(true)` still works as long as the class is in an unnamed module (which all WAR-deployed code is). Only JDK-internal fields are restricted.
+
+#### Affected idiom 3 — `getDeclaredMethod` + `invoke` as a general dispatch pattern
+
+Frameworks that use reflection for plugin dispatch or annotation-driven invocation often use this pattern:
+
+**Before (may break when target method is on a JDK type):**
+```java
+Method m = targetClass.getDeclaredMethod(methodName, paramTypes);
+m.setAccessible(true);
+m.invoke(target, args);
+```
+
+**After — switch to `MethodHandles` for JDK types:**
+```java
+MethodHandles.Lookup lookup = MethodHandles.privateLookupIn(targetClass, MethodHandles.lookup());
+MethodHandle handle = lookup.findVirtual(targetClass, methodName,
+    MethodType.methodType(returnType, paramTypes));
+handle.invoke(target, args);
+```
+
+> `MethodHandles.privateLookupIn` requires the caller's module to have `opens` access to the target's package. For your own classes in unnamed modules this is automatic. For JDK types it still requires `--add-opens`.
+
+#### Affected idiom 4 — `--add-opens` as a JVM flag workaround
+
+If the project already works around reflective access restrictions via JVM flags, those flags need to be declared in the SAP Java Buildpack manifest so they are passed to the JVM at startup.
+
+**Detect:**
+```bash
+grep -rn "add-opens\|add-exports" pom.xml src/
+```
+
+**Pass `--add-opens` via the buildpack's `JBP_CONFIG_JAVA_OPTS` env var in `mtad.yaml`:**
+
+```yaml
+properties:
+  JBP_CONFIG_JAVA_OPTS: '[java_opts: "--add-opens java.base/java.lang=ALL-UNNAMED --add-opens java.base/java.lang.reflect=ALL-UNNAMED"]'
+```
+
+> **Note:** `--add-opens` is a last-resort workaround. Prefer rewriting to the public API (idioms 1–3 above). Each `--add-opens` is a maintenance liability and may stop working in a future Java release.
+
+#### Verify
+
+```bash
+# After fixing: compile and run tests
+mvn clean test
+
+# Check that no reflective-access warnings appear in test output
+# Java 25 prints WARNING: ... illegal reflective access for any remaining violations
+mvn test 2>&1 | grep -i "InaccessibleObjectException\|IllegalAccessException\|illegal reflective"
+```
+
 ## CF Services
 
 No CF services required for this skill.
@@ -1016,6 +1135,10 @@ mvn test
 ### Issue: EqualsVerifier fails with "Significant fields: equals does not use X" or "Equals is inherited directly from Object"
 **Cause:** EqualsVerifier 3.x is stricter about field usage and equals() inheritance.
 **Solution:** Suppress with `Warning.ALL_FIELDS_SHOULD_BE_USED` or `Warning.INHERITED_DIRECTLY_FROM_OBJECT` as appropriate.
+
+### Issue: InaccessibleObjectException or IllegalAccessException at runtime on Java 25
+**Cause:** Java 25 tightens reflective access to JDK internals and annotation proxies. Code using `Method.invoke()` on annotation proxy objects, `setAccessible(true)` on JDK-internal fields, or `getDeclaredMethod`/`getDeclaredField` on JDK types will fail.
+**Solution:** See **Step 11** above. Replace `Method.invoke` on annotation proxies with direct annotation API calls or `MethodHandles`. Replace `setAccessible(true)` on JDK types with the public API equivalent. As a last resort, pass `--add-opens` via `JBP_CONFIG_JAVA_OPTS` in `mtad.yaml`.
 
 ## Next Steps
 

@@ -24,23 +24,13 @@ In the Neo environment, the platform handled routing and authentication implicit
 
 ## Detection
 
-This skill applies if any of these conditions are true:
+> **Do NOT invoke this skill based on the presence of `web.xml` alone.** Almost every Java servlet application has a `web.xml`. An approuter is only needed when the application requires user-facing authentication or serves static web content. Headless backend apps (REST APIs, mail, persistence, document management, keystore) must NOT have an approuter added — it creates an unbacked module and breaks deploy.
 
-### Web-facing application
-```bash
-# Has a webapp directory with web content
-find . -path "*/webapp/*" -type f | head -5
+This skill applies **only** if at least one of these explicit auth/UI signals is present:
 
-# Has HTML files served to users
-find . -name "*.html" -path "*/webapp/*" | head -5
-
-# Has web.xml (servlet-based app)
-find . -name "web.xml" -path "*/WEB-INF/*" | head -5
-```
-
-### Authentication is present
+### Explicit authentication signal in web.xml
 ```xml
-<!-- web.xml contains auth-method -->
+<!-- auth-method is FORM or XSUAA -->
 <auth-method>FORM</auth-method>
 
 <!-- OR security-constraint definitions -->
@@ -50,6 +40,22 @@ find . -name "web.xml" -path "*/WEB-INF/*" | head -5
         <url-pattern>/protected/*</url-pattern>
     </web-resource-collection>
 </security-constraint>
+```
+
+```bash
+# Detect auth signals
+grep -l "auth-method\|security-constraint" src/main/webapp/WEB-INF/web.xml
+```
+
+### UserProvider usage in Java source
+```bash
+grep -rl "UserProvider\|getUserPrincipal\|isUserInRole" src/main/java/
+```
+
+### Static web content served to users
+```bash
+# HTML files in webapp/ — indicates a UI that needs an entry point
+find . -name "*.html" -path "*/webapp/*" | head -5
 ```
 
 ### User explicitly requests approuter setup
@@ -89,6 +95,40 @@ find . -name "web.xml" -path "*/WEB-INF/*" | head -5
 > the app is healthy, the approuter is healthy, and every call returns 404.
 > Skipping the approuter entirely (the app is reached directly) avoids the
 > whole class of mismatch.
+
+## Backend-only apps — XSUAA without approuter
+
+If the application is a headless REST/servlet app (no user-facing UI, no FORM auth) but still needs XSUAA for technical token validation (e.g. machine-to-machine calls), **do not add an approuter**. Bind XSUAA directly to the Java module:
+
+```yaml
+# mtad.yaml — XSUAA-only, no approuter module
+modules:
+  - name: <app-name>
+    type: java.tomcat
+    path: target/<artifactId>.war
+    parameters:
+      buildpack: sap_java_buildpack_jakarta
+      memory: 1024M
+      disk-quota: 1024M
+    properties:
+      ENABLE_SECURITY_JAVA_API_V2: true
+      JBP_CONFIG_COMPONENTS: "jres: ['com.sap.xs.java.buildpack.jre.SAPMachineJRE']"
+      JBP_CONFIG_SAP_MACHINE_JRE: "{ version: 25.+ }"
+      TARGET_RUNTIME: tomcat
+      SET_LOGGING_LEVEL: 'ROOT: INFO'
+    requires:
+      - name: <app-name>-xsuaa
+
+resources:
+  - name: <app-name>-xsuaa
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: xsuaa
+      service-plan: application
+      path: xs-security.json
+```
+
+> The `authentication-xsuaa` skill handles the `xs-security.json` and XSUAA service resource. An approuter is only needed when you want the platform to enforce authentication *before* requests reach the backend.
 
 ## Prerequisites
 
@@ -173,8 +213,8 @@ Create `approuter/xs-app.json` — see [assets/xs-app.json](assets/xs-app.json):
     "authenticationMethod": "route",
     "routes": [
         {
-            "source": "^(/.*)",
-            "target": "$1",
+            "source": "^/(.*)$",
+            "target": "/$1",
             "destination": "<destination-name>",
             "authenticationType": "xsuaa",
             "csrfProtection": false
@@ -184,6 +224,8 @@ Create `approuter/xs-app.json` — see [assets/xs-app.json](assets/xs-app.json):
 ```
 
 > **Note:** Replace `<destination-name>` with the name of the destination you will wire in `mtad.yaml` (e.g., `backend-app-destination`). This destination proxies requests from the approuter to your Java backend.
+
+> **Context path:** `sap_java_buildpack_jakarta` always serves the app at `/` (ROOT context). It additionally registers the app at `/<warName>/` only if `web.xml` contains a servlet mapped to `url-pattern: /`. In most migrated apps there is no such mapping, so only `/` works — approuter targets should use `/$1` without any `/<artifactId>/` prefix.
 
 #### xs-app.json with Protected and Public Routes
 
@@ -201,8 +243,8 @@ If your application has both protected and public endpoints:
             "csrfProtection": false
         },
         {
-            "source": "^(/.*)",
-            "target": "$1",
+            "source": "^/(.*)$",
+            "target": "/$1",
             "destination": "<destination-name>",
             "authenticationType": "none",
             "csrfProtection": false
@@ -270,8 +312,8 @@ For applications where the backend explicitly sends `WWW-Authenticate` or `com.s
             "csrfProtection": false
         },
         {
-            "source": "^(/.*)",
-            "target": "$1",
+            "source": "^/(.*)$",
+            "target": "/$1",
             "destination": "<destination-name>",
             "authenticationType": "none",
             "csrfProtection": false
@@ -400,8 +442,8 @@ modules:
     path: <path-to-war-file>
     parameters:
       buildpack: sap_java_buildpack_jakarta
-      disk-quota: 512MB
-      memory: 512MB
+      disk-quota: 1024M
+      memory: 1024M
     properties:
       ENABLE_SECURITY_JAVA_API_V2: true
       SET_LOGGING_LEVEL: 'ROOT: INFO'

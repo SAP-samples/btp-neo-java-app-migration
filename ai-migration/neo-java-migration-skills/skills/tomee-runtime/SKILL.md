@@ -356,11 +356,11 @@ version: 0.0.1
 modules:
   - name: ${app-name}
     type: java.tomcat  # Still use java.tomcat type
-    path: target/${app-name}.war
+    path: target/<artifactId>.war
     parameters:
       buildpack: sap_java_buildpack_jakarta
-      disk-quota: 512MB
-      memory: 512MB
+      disk-quota: 1024M
+      memory: 1024M
     properties:
       # Enable TomEE runtime
       TARGET_RUNTIME: tomee

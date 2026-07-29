@@ -2,8 +2,8 @@
     "authenticationMethod": "route",
     "routes": [
         {
-            "source": "^(/.*)",
-            "target": "$1",
+            "source": "^/(.*)$",
+            "target": "/$1",
             "destination": "<destination-name>",
             "authenticationType": "xsuaa",
             "csrfProtection": false

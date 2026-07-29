@@ -386,11 +386,11 @@ For on-premise mail servers via Cloud Connector:
 modules:
   - name: ${app-name}
     type: java.tomcat
-    path: target/${app-name}.war
+    path: target/<artifactId>.war
     parameters:
       buildpack: sap_java_buildpack_jakarta
-      disk-quota: 512MB
-      memory: 512MB
+      disk-quota: 1024M
+      memory: 1024M
     properties:
       ENABLE_SECURITY_JAVA_API_V2: true
       SET_LOGGING_LEVEL: 'ROOT: INFO'
@@ -447,6 +447,14 @@ cf logs ${app-name} --recent | grep -i mail
 ```
 
 ## Common Issues
+
+### Common runtime errors → root cause
+
+| Runtime error | Root cause | Fix |
+|---|---|---|
+| `DestinationNotFoundException` for mail destination | Missing `connectivity-destination-service` runtime dep | Add to `pom.xml` with `<scope>runtime</scope>` |
+| `MessagingException: Could not connect to SMTP host` | Destination URL or port wrong, or mail service not reachable from CF | Verify destination properties in BTP Cockpit; check that the SMTP port is open |
+| `AuthenticationFailedException` | Credentials not set in destination, or `Transport.connect()` not passed explicit user/password | See issue below — pass credentials explicitly |
 
 ### Issue: "failed to connect, no password specified?" with `transport.connect()`
 **Cause:** `Transport.connect()` without arguments does not read credentials from the mail session properties. The destination service provides credentials as `mail.user` and `mail.password` (with `mail.` prefix), but `transport.connect()` only reads `mail.smtp.user` from session properties and never reads any password property automatically.

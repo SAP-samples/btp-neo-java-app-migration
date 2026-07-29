@@ -187,7 +187,31 @@ Add to `<dependencies>` section:
 
 > **Note:** The `jakarta.servlet-api` does not need an explicit `<scope>provided</scope>` as this is inherited from the BOM.
 
-### Step 5: Add Additional Dependencies (as needed)
+### Step 5: Detect existing JSON/logging/HTTP conventions before adding dependencies
+
+Before adding any new dependencies, scan the project to avoid introducing duplicate libraries:
+
+```bash
+# JSON libraries
+grep -E "fasterxml\.jackson|com\.google\.code\.gson|org\.json|jakarta\.json" pom.xml
+grep -rl "ObjectMapper\|new Gson()\|new JSONObject\|JsonbBuilder\|Json\.create" --include="*.java" src/main/java/ 2>/dev/null | head -5
+
+# HTTP client libraries
+grep -E "httpclient|httpclient5|okhttp|java\.net\.http" pom.xml
+
+# Logging
+grep -E "slf4j|logback|log4j" pom.xml
+```
+
+**Rule:** If a library is found — reuse it. Only add a new dependency if nothing is found.
+
+| Library type | Default if nothing found |
+|---|---|
+| JSON | `jakarta.json` (JSON-P via `parsson`) — already in `cf-tomcat-bom`, no extra entry needed |
+| HTTP | SAP Cloud SDK `HttpClientAccessor` — already present after this skill |
+| Logging | `slf4j` + `logback` — already in `cf-tomcat-bom` |
+
+### Step 6: Add Additional Dependencies (as needed)
 
 Depending on what Neo APIs you were using, add these dependencies:
 
@@ -230,7 +254,7 @@ Depending on what Neo APIs you were using, add these dependencies:
 </dependency>
 ```
 
-### Step 6: Migrate SAPUI5 ResourceServlet (Conditional)
+### Step 7: Migrate SAPUI5 ResourceServlet (Conditional)
 
 In Neo, the platform-provided `com.sap.ui5.resource.ResourceServlet` served SAPUI5 libraries at `/resources/*`. This servlet class does **not exist** in Cloud Foundry. If HTML files reference SAPUI5 via a relative `resources/sap-ui-core.js` path, the page will load but render **blank** because the UI5 library returns 404.
 
@@ -322,7 +346,7 @@ grep -rl "sap_bluecrystal" --include="*.json" src/main/webapp/ | \
 | `sap_bluecrystal` | `sap_fiori_3` or `sap_horizon` |
 | `sap_belize` | `sap_fiori_3` or `sap_horizon` |
 
-### Step 7: Verify Servlet Mappings
+### Step 8: Verify Servlet Mappings
 
 If the Neo web.xml had `<servlet-mapping>` entries (e.g., for CXF/JAX-RS servlets), ensure they are preserved in the CF web.xml. A common oversight is copying the `<servlet>` declaration without its `<servlet-mapping>`, which causes REST APIs to return 404.
 
@@ -345,7 +369,7 @@ For each `<servlet-name>`, verify a corresponding `<servlet-mapping>` exists. Fo
 
 > **Warning (TomEE only):** If the application uses TomEE (EJB support), `CXFNonSpringJaxrsServlet` **must be removed entirely** from `web.xml` — not just have its mapping added. This servlet bypasses TomEE's CDI container, causing `@Inject` and `@EJB` fields in JAX-RS endpoints to remain `null` (`NullPointerException` at runtime). See the **tomee-runtime** skill, Step 6 for details.
 
-### Step 8: Update Import Statements
+### Step 9: Update Import Statements
 
 Replace Neo-specific imports with SAP Cloud SDK equivalents:
 
@@ -356,11 +380,11 @@ Replace Neo-specific imports with SAP Cloud SDK equivalents:
 | `com.sap.cloud.account.TenantContext` | `com.sap.cloud.sdk.cloudplatform.tenant.TenantAccessor` |
 | `com.sap.security.um.user.UserProvider` | Via XSUAA token (see authentication skill) |
 
-### Step 9: Complete pom.xml Example
+### Step 10: Complete pom.xml Example
 
 See [assets/pom-cf-tomcat.xml](assets/pom-cf-tomcat.xml) for a complete template.
 
-### Step 10: Build packaging — owned by `mta-descriptor`
+### Step 11: Build packaging — owned by `mta-descriptor`
 
 This skill is a **dependency-management** skill: it swaps Neo `pom.xml`
 dependencies for the CF BOM, SAP Cloud SDK modules BOM, and Cloud
@@ -404,6 +428,23 @@ grep -rh "com.sap.cloud.account\|com.sap.core.connectivity\|com.sap.security.um"
 ```
 Should return results that need to be replaced with SDK equivalents.
 
+### Step 12: Validate runtime classpath
+
+**MANDATORY — run this before moving to the next skill.**
+
+If the app uses `DestinationAccessor` (from the `destinations` skill or directly), `connectivity-destination-service` must be on the runtime classpath. The SDK compiles without it — the error only appears at runtime as `DestinationNotFoundException` for every destination, even ones that exist.
+
+Check whether it is already present (e.g. added by a previous migration run):
+
+```bash
+grep -q "connectivity-destination-service" pom.xml && echo "already present — skip" || echo "MISSING — will be added by destinations skill"
+```
+
+- If **already present** → nothing to do here.
+- If **MISSING** → do NOT add it now. The `destinations` skill owns this dependency and will add it in its Step 5. Adding it here and again there causes no harm (it is idempotent), but leaving it to `destinations` keeps ownership clear. Note this as a follow-up for the orchestrator.
+
+> **Why not add it here?** `sdk-replacement` is a dependency-management skill — it replaces Neo SDK with SAP Cloud SDK. Whether the app actually uses destinations is not known until the `destinations` skill runs. Adding `connectivity-destination-service` here would be premature for apps that don't use destinations.
+
 ## Common Issues
 
 ### Issue: Missing dependency versions
@@ -429,6 +470,48 @@ Should return results that need to be replaced with SDK equivalents.
 ### Issue: REST API endpoints return 404 after deployment
 **Cause:** The CXF/JAX-RS servlet was declared in web.xml but the `<servlet-mapping>` was missing. Without a mapping, the servlet is registered but unreachable.
 **Solution:** See **Step 7** above. Add a `<servlet-mapping>` for the servlet (e.g., `<url-pattern>/rest/*</url-pattern>`).
+
+### Common runtime errors → root cause
+
+These errors appear at runtime (not at compile or deploy time) and are typically caused by missing `runtime`-scoped dependencies:
+
+| Runtime error | Root cause | Fix |
+|---|---|---|
+| `DestinationNotFoundException` for every destination | Missing `connectivity-destination-service` runtime dep | Add to `pom.xml` with `<scope>runtime</scope>` |
+| `NoClassDefFoundError: com/sap/cloud/sdk/...` | SDK module not packaged in WAR | Remove `<scope>provided</scope>` from the SDK dep |
+| `ServiceLoader: no provider found for DestinationService` | Same as above | Same fix |
+| `ClassCastException` on CF SDK types | Two versions of the same SDK artifact in the WAR | Run `mvn dependency:tree` and add exclusion for the older version |
+| `NullPointerException` in `DestinationAccessor.getDestination` | `VCAP_SERVICES` env var not set (app not bound to destination service) | Check `cf env <app>` — bind the destination service instance |
+
+### Post-migration runtime dependency validation
+
+Run this before `cf deploy` to catch missing runtime dependencies early:
+
+```bash
+# Build the WAR and check its contents
+mvn clean package -DskipTests -q
+
+WAR=$(find target -name "*.war" | head -1)
+echo "Checking WAR: $WAR"
+
+# Check connectivity-destination-service is packaged (required for DestinationAccessor)
+if jar tf "$WAR" | grep -q "connectivity-destination-service"; then
+  echo "OK: connectivity-destination-service found in WAR"
+else
+  echo "MISSING: connectivity-destination-service — add to pom.xml with <scope>runtime</scope>"
+  echo "  <dependency>"
+  echo "    <groupId>com.sap.cloud.sdk.cloudplatform</groupId>"
+  echo "    <artifactId>connectivity-destination-service</artifactId>"
+  echo "    <scope>runtime</scope>"
+  echo "  </dependency>"
+fi
+
+# Check for duplicate SAP Cloud SDK versions (classloading conflicts)
+mvn dependency:tree -q | grep "com.sap.cloud.sdk" | sort | uniq -d | \
+  awk '{print "WARNING: duplicate SDK artifact:", $0}'
+
+echo "Validation complete."
+```
 
 ## Next Steps
 

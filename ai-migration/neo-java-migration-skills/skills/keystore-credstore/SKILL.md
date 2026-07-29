@@ -253,6 +253,15 @@ public class KeyStoreServlet extends HttpServlet {
     }
 
     @Override
+    public void destroy() {
+        // Release the mTLS private key when the servlet is taken out of service.
+        // CredStoreClient holds the key for its whole lifetime (the SSLContext
+        // reuses it across requests), so it must only be destroyed here — never
+        // per request — otherwise subsequent mTLS handshakes fail.
+        credStoreClient.close();
+    }
+
+    @Override
     protected void doGet(HttpServletRequest request, HttpServletResponse response) throws IOException {
         String alias = request.getParameter(PARAM_ALIAS);
         String namespace = request.getParameter(PARAM_NAMESPACE);
@@ -345,11 +354,11 @@ protected void doGet(HttpServletRequest request, HttpServletResponse response) t
 modules:
   - name: ${app-name}
     type: java.tomcat
-    path: target/${app-name}.war
+    path: target/<artifactId>.war
     parameters:
       buildpack: sap_java_buildpack_jakarta
-      disk-quota: 512MB
-      memory: 512MB
+      disk-quota: 1024M
+      memory: 1024M
     properties:
       ENABLE_SECURITY_JAVA_API_V2: true
       SET_LOGGING_LEVEL: 'ROOT: INFO'
@@ -468,6 +477,15 @@ returning `Password retrieved successfully.` on 200.
 
 These are real failure modes we have hit on this codebase. The cures are listed
 in roughly the order you would try them.
+
+### Common runtime errors → root cause
+
+| Runtime error | Root cause | Fix |
+|---|---|---|
+| `NoClassDefFoundError: com/sap/cloud/security/...` | `java-api` or security library not packaged in WAR | Remove `<scope>provided</scope>` from the security dep in `pom.xml` |
+| `NullPointerException` in `CredStoreClient` | `VCAP_SERVICES` env var not set — app not bound to credstore service | Check `cf env <app>` — bind the credstore service instance |
+| `401 Unauthorized` from credstore REST API | mTLS certificate not passed correctly — using plain HTTP client instead of mTLS | Ensure the client uses the certificate and key from `VCAP_SERVICES.credstore[0].credentials` |
+| `404 Not Found` from credstore REST API | Namespace or alias does not exist | Create namespace/alias via BTP Cockpit or credstore REST API before the app tries to read it |
 
 ### `java.lang.UnsupportedClassVersionError: ... class file version 69.0, this version of the Java Runtime only recognizes class file versions up to 65.0`
 
