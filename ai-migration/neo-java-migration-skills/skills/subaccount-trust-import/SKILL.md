@@ -210,32 +210,28 @@ IDP_NAME="${idp.name}"
 TENANT_NAME=$(echo "$IAS_HOST" | cut -d. -f1)  # e.g. "mytenant" from "mytenant.accounts.ondemand.com"
 ORIGIN_KEY="${TENANT_NAME}.migrated"
 
-PAYLOAD=$(cat <<EOF
-{
-  "name": "Neo migrated IAS Tenant",
-  "type": "saml",
-  "originKey": "${ORIGIN_KEY}",
-  "isActive": true,
-  "config": {
-    "idpEntityAlias": "${IAS_HOST}",
-    "metaDataLocation": $(echo "$IAS_METADATA" | python3 -c "import sys, json; print(json.dumps(sys.stdin.read()))"),
-    "addShadowUserOnLogin": true,
-    "attributeMappings": {
-      "given_name": "first_name",
-      "family_name": "last_name",
-      "email": "mail"
+PAYLOAD=$(IAS_HOST="$IAS_HOST" ORIGIN_KEY="$ORIGIN_KEY" IAS_METADATA="$IAS_METADATA" python3 -c "
+import json, os
+print(json.dumps({
+    'name': 'Neo migrated IAS Tenant',
+    'type': 'saml',
+    'originKey': os.environ['ORIGIN_KEY'],
+    'isActive': True,
+    'config': {
+        'idpEntityAlias': os.environ['IAS_HOST'],
+        'metaDataLocation': os.environ['IAS_METADATA'],
+        'addShadowUserOnLogin': True,
+        'attributeMappings': {
+            'given_name': 'first_name',
+            'family_name': 'last_name',
+            'email': 'mail'
+        }
     }
-  }
-}
-EOF
-)
+}))
+")
 ```
 
-> **Note on `metaDataLocation`**: The IAS metadata XML must be embedded as a JSON string (with quotes escaped). The `python3 -c` call above handles this encoding. If python3 is unavailable, use `jq -Rs .` instead:
-> ```bash
-> META_ENCODED=$(echo "$IAS_METADATA" | jq -Rs .)
-> ```
-> Then embed `$META_ENCODED` directly in the JSON without the outer quotes from the `cat` heredoc.
+> **Note on `metaDataLocation`**: The IAS metadata XML is passed via `os.environ` — Python reads it directly from the process environment without shell interpolation. This avoids shell injection: if the metadata contained shell metacharacters (backticks, `$()`), a heredoc approach would execute them. Using `os.environ` treats the content as a plain string regardless of what it contains.
 
 ### 4c. POST trust to XSUAA
 
