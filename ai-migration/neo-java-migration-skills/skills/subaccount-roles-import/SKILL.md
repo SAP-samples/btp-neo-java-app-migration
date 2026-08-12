@@ -104,7 +104,7 @@ print(all_idps[0]['originKey'] if all_idps else 'sap.default')
 
 If `.migration/neo-trust-import-report.json` does not exist or contains no imported IdPs, fall back to `sap.default` and note it in the report:
 
-> "No trust import report found — using `sap.default` as the IdP origin for user assignments. If users authenticate via a custom IdP, re-run this skill after completing `subaccount-trust-import`."
+> "No trust migration report found — using `sap.default` as the IdP origin for user assignments. If users authenticate via a custom IdP, re-run this skill after completing `subaccount-trust-migrator`."
 
 **0c. Ask the user** for any values still missing:
 
@@ -235,7 +235,7 @@ btp assign security/role-collection "${COLLECTION_NAME}" \
 
 For each group in `groups[]`:
 
-The group role collection may already exist if `subaccount-trust-import` created it for assertion-based group rules. Check first:
+The group role collection may already exist if `subaccount-trust-migrator` created it for assertion-based group rules. Check first:
 
 ```bash
 EXISTING=$(btp --format json list security/role-collection --subaccount "${CF_SUBACCOUNT_ID}" | \
