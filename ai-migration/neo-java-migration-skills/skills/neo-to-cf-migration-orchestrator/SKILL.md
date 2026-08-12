@@ -138,7 +138,7 @@ PHASE 0: Tooling setup — once
   Install CF CLI + BTP CLI, login to both
 
 PHASE 1: Subaccount export — once (read-only, Neo side)
-  subaccount-trust-export
+  subaccount-trust-migrator            ← export + import in one pass (in-memory, no disk files)
   subaccount-roles-export              ← export now; import deferred to Phase 5
   (destinations are NOT exported to file — migrated directly in Phase 3 via neo-destinations-keystores-migrator)
 
@@ -151,7 +151,7 @@ PHASE 2: Per-app code migration — repeat for each app directory
     mta-descriptor
 
 PHASE 3: Platform import — once (CF side, before deploy)
-  subaccount-trust-import
+  (trust already imported in Phase 1 by subaccount-trust-migrator)
   (roles-import is NOT here — deferred)
 
 PHASE 4: Deploy all apps — once per app

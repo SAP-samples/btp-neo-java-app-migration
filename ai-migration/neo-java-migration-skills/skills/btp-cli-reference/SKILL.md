@@ -582,7 +582,7 @@ btp --format json list services/instance | jq '.[] | {name, offering, plan, stat
 ## See Also
 
 - [authentication-xsuaa/SKILL.md](../authentication-xsuaa/SKILL.md) — XSUAA scopes, role-templates, xs-security.json
-- [subaccount-trust-import/SKILL.md](../subaccount-trust-import/SKILL.md) — automated trust creation via BTP CLI
+- [subaccount-trust-migrator/SKILL.md](../subaccount-trust-migrator/SKILL.md) — automated trust migration (export + import in-memory) via BTP CLI
 - [subaccount-roles-import/SKILL.md](../subaccount-roles-import/SKILL.md) — automated role collection creation via BTP CLI
 - [subaccount-destinations-import/SKILL.md](../subaccount-destinations-import/SKILL.md) — destination import (REST API, not BTP CLI)
 

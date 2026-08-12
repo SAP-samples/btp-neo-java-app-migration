@@ -376,4 +376,4 @@ After completing this skill:
 
 - **[subaccount-roles-import](../subaccount-roles-import/SKILL.md)** — reads `$MIGRATION_DIR/neo-roles.json` and creates CF role collections with user assignments
 - **[authentication-xsuaa](../authentication-xsuaa/SKILL.md)** — for each application, define proper XSUAA scopes and role-templates; the role collections created by `subaccount-roles-import` can then be extended with application scopes
-- **[subaccount-trust-export](../subaccount-trust-export/SKILL.md)** — if not done, export IdP trust configuration (group-based access rules may depend on the IdP configuration)
+- **[subaccount-trust-migrator](../subaccount-trust-migrator/SKILL.md)** — if not done, migrate IdP trust configuration (group-based access rules may depend on the IdP configuration)
