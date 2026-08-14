@@ -5,7 +5,16 @@ All notable changes to the **sap-btp-neo-migration** plugin are documented in th
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.1.0] - 2026-08-10
+## [1.1.1] - 2026-08-14
+
+### Added
+- Telemetry and correlation IDs for all NEO API calls, with per-subaccount state isolation and consent management.
+- Replaced the separate trust export and import skills with a unified in-memory trust migrator that handles the full Neo→CF trust migration in a single step.
+
+### Fixed
+- Various bug fixes in the subaccount migration orchestrator, trust migrator, destinations/keystores migrator, and roles export skill.
+
+## [1.1.0] - 2026-08-05
 
 ### Added
 - **Orchestration algorithms** in the migration orchestrator for smarter end-to-end app migration sequencing.
