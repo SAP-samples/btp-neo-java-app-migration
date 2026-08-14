@@ -6,17 +6,18 @@ to CF in the same process. No intermediate files are created.
 
 Usage:
   TOKEN=<neo-platform-api-token>
-  HOST=<landscape>               e.g. hana.ondemand.com
-  ACCOUNT=<neo-subaccount>
+  REGION_HOST=<landscape>        e.g. hana.ondemand.com
+  SUBACCOUNT=<neo-subaccount>
   APP_MAPPING=<json>             e.g. '{"neo-app1": "cf-app1", "neo-app2": "cf-app1"}'
 
 Optional overrides:
-  KEYSTORE_BASE   override https://api.<HOST>/keystore/v1
-  CONFIG_BASE     override https://configapi.<HOST>/configuration/api/rest/oauth/SPACES/<ACCOUNT>
-  WORKERS         thread count for parallel app processing (default: 20)
+  KEYSTORE_BASE       override for NEO_KEYSTORE_BASE (set by neo-api-setup-template.sh)
+  CONFIG_BASE         override for NEO_CONFIG_BASE (set by neo-api-setup-template.sh)
+  WORKERS             thread count for parallel app processing (default: 20)
 """
-import os, json, re, base64, subprocess, time, sys
+import os, json, re, base64, subprocess, time, sys, uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from urllib.parse import urlencode
 
 REQUIRED_SCOPES = {"hcp.readKeystores", "hcp.readDestination", "hcp.readJavaApplications"}
 
@@ -54,21 +55,149 @@ try:
         sys.exit(1)
 except (IndexError, ValueError, KeyError):
     pass  # If token is opaque or unparseable, skip static check and let API calls fail naturally.
-HOST = os.environ.get("HOST", "").strip()
+HOST = os.environ.get("REGION_HOST", os.environ.get("HOST", "")).strip()
 if not HOST:
-    print("ERROR: HOST environment variable is required (e.g. hana.ondemand.com)", file=sys.stderr)
+    print("ERROR: REGION_HOST environment variable is required (e.g. hana.ondemand.com)", file=sys.stderr)
     sys.exit(1)
-ACCOUNT = os.environ["ACCOUNT"]
-APP_MAPPING = json.loads(os.environ["APP_MAPPING"])
+ACCOUNT = os.environ.get("SUBACCOUNT", os.environ.get("ACCOUNT", "")).strip()
+if not ACCOUNT:
+    print("ERROR: SUBACCOUNT environment variable is required", file=sys.stderr)
+    sys.exit(1)
+APP_MAPPING = {} if "--list-apps" in sys.argv else json.loads(os.environ["APP_MAPPING"])
 WORKERS = int(os.environ.get("WORKERS", "20"))
-MIGRATE_KEYSTORES = os.environ.get("MIGRATE_KEYSTORES", "true").strip().lower() != "false"
-MIGRATE_OAUTH_CREDENTIALS = os.environ.get("MIGRATE_OAUTH_CREDENTIALS", "true").strip().lower() != "false"
+MIGRATE_KEYSTORES = os.environ.get("MIGRATE_KEYSTORES", "").strip().lower() == "yes"
+MIGRATE_OAUTH_CREDENTIALS = os.environ.get("MIGRATE_OAUTH_CREDENTIALS", "").strip().lower() == "yes"
 
-KEYSTORE_BASE = os.environ.get("KEYSTORE_BASE") or f"https://api.{HOST}/keystore/v1"
-CONFIG_BASE = os.environ.get("CONFIG_BASE") or \
-    f"https://configapi.{HOST}/configuration/api/rest/oauth/SPACES/{ACCOUNT}"
+def _require_env(name):
+    val = os.environ.get(name, "").strip()
+    if not val:
+        print(f"ERROR: {name} is not set — source neo-api-setup-template.sh before running this script.", file=sys.stderr)
+        sys.exit(1)
+    return val
 
-LIFECYCLE_BASE = f"https://api.{HOST}/lifecycle/v1"
+KEYSTORE_BASE = os.environ.get("KEYSTORE_BASE") or _require_env("NEO_KEYSTORE_BASE")
+CONFIG_BASE = os.environ.get("CONFIG_BASE") or _require_env("NEO_CONFIG_BASE")
+NEO_LIFECYCLE_URL = _require_env("NEO_LIFECYCLE_URL")
+
+# ---------------------------------------------------------------------------
+# Telemetry — correlation IDs
+# ---------------------------------------------------------------------------
+
+def _load_correlation_params():
+    neo_migration_home = (
+        os.environ.get("XDG_DATA_HOME")
+        or os.environ.get("APPDATA")
+        or os.path.expanduser("~")
+    )
+    neo_migration_home = os.path.join(neo_migration_home, ".neo-migration")
+    neo_consents_home = os.path.join(
+        os.environ.get("XDG_DATA_HOME") or os.environ.get("APPDATA") or os.path.expanduser("~"),
+        ".neo-migration-consents"
+    )
+    cf_guid = os.environ.get("CF_SUBACCOUNT_GUID", "").strip()
+    if not cf_guid:
+        # Resolve from cf target + btp list accounts/subaccount
+        try:
+            cf_org = subprocess.run(
+                ["cf", "target"], capture_output=True, text=True
+            ).stdout
+            org_name = next(
+                (l.split(":", 1)[1].strip() for l in cf_org.splitlines() if l.strip().startswith("org:")),
+                ""
+            )
+            btp_out = subprocess.run(
+                ["btp", "list", "accounts/subaccount"], capture_output=True, text=True
+            ).stdout
+            for line in btp_out.splitlines()[2:]:
+                parts = line.split()
+                if len(parts) >= 3 and parts[2] in org_name:
+                    cf_guid = parts[0]
+                    break
+        except Exception:
+            pass
+    if not cf_guid:
+        print("ERROR: CF_SUBACCOUNT_GUID is not set and could not be resolved automatically.\n"
+              "       Run 'cf target' and 'btp list accounts/subaccount' to verify your login state.",
+              file=sys.stderr)
+        sys.exit(1)
+    subaccount_dir = os.path.join(neo_migration_home, ACCOUNT, cf_guid)
+    telemetry_file = os.path.join(neo_consents_home, "neo-telemetry-installation.txt")
+    consent_file = os.path.join(neo_consents_home, ACCOUNT, "neo-telemetry-consent.txt")
+    session_file = os.path.join(neo_consents_home, ACCOUNT, cf_guid, "neo-telemetry-session.txt")
+
+    try:
+        # --- consent (per subaccount) ---
+        if not os.path.isfile(consent_file):
+            print("\n=== Telemetry Notice ===")
+            print("This migration appends two non-PII random UUIDs (neo_cf_migration_installation_id, neo_cf_migration_session_id)")
+            print("as query parameters to every NEO API call to support usage tracking and troubleshooting.")
+            print("No personal data, subaccount names, or credentials are included.")
+            print()
+            consent = input("Enable telemetry? (yes/no): ").strip().lower()
+            os.makedirs(os.path.join(neo_consents_home, ACCOUNT), exist_ok=True)
+            with open(consent_file, "w") as f:
+                f.write(f"consent={consent}\n")
+            print(f"INFO: Telemetry {'enabled' if consent == 'yes' else 'disabled'}.")
+        else:
+            consent = ""
+            with open(consent_file) as f:
+                for line in f:
+                    k, _, v = line.strip().partition("=")
+                    if k.strip() == "consent":
+                        consent = v.strip().lower()
+
+        if consent != "yes":
+            return ""
+
+        # --- installation_id (once per machine) ---
+        installation_id = ""
+        if os.path.isfile(telemetry_file):
+            with open(telemetry_file) as f:
+                for line in f:
+                    k, _, v = line.strip().partition("=")
+                    if k.strip() == "neo_cf_migration_installation_id":
+                        installation_id = v.strip()
+        if not installation_id:
+            installation_id = str(uuid.uuid4())
+            os.makedirs(neo_consents_home, exist_ok=True)
+            with open(telemetry_file, "w") as f:
+                f.write(f"neo_cf_migration_installation_id={installation_id}\n")
+
+        # --- session_id (per subaccount — reuse if present, new if not) ---
+        migration_id = ""
+        if os.path.isfile(session_file):
+            with open(session_file) as f:
+                for line in f:
+                    k, _, v = line.strip().partition("=")
+                    if k.strip() == "neo_cf_migration_session_id":
+                        migration_id = v.strip()
+            if migration_id:
+                print(f"INFO: Resuming migration session. neo_cf_migration_session_id: {migration_id}")
+        if not migration_id:
+            migration_id = str(uuid.uuid4())
+            os.makedirs(os.path.join(neo_consents_home, ACCOUNT, cf_guid), exist_ok=True)
+            with open(session_file, "w") as f:
+                f.write(f"neo_cf_migration_session_id={migration_id}\n")
+            print(f"INFO: New migration session started. neo_cf_migration_session_id: {migration_id}")
+
+    except OSError as e:
+        print(f"WARNING: Telemetry disabled — could not read/write telemetry file: {e}", file=sys.stderr)
+        return ""
+
+    if not installation_id or not migration_id:
+        return ""
+    return urlencode({"neo_cf_migration_installation_id": installation_id,
+                      "neo_cf_migration_session_id": migration_id})
+
+_CORRELATION_PARAMS = _load_correlation_params()
+
+
+def _neo_url(url):
+    """Append correlation query parameters to a NEO API URL."""
+    if not _CORRELATION_PARAMS:
+        return url
+    sep = "&" if "?" in url else "?"
+    return f"{url}{sep}{_CORRELATION_PARAMS}"
 
 # ---------------------------------------------------------------------------
 # Result tracking
@@ -143,7 +272,7 @@ def neo_get_binary(url):
 
 def neo_get_headers(url):
     r = subprocess.run(
-        ["curl", "-s", "-I", url, "-H", f"Authorization: Bearer {NEO_TOKEN}"],
+        ["curl", "-s", "-D", "-", "-o", "/dev/null", url, "-H", f"Authorization: Bearer {NEO_TOKEN}"],
         capture_output=True)
     if r.returncode != 0:
         raise RuntimeError(f"curl failed fetching headers for {url}: {r.stderr.decode('utf-8', errors='replace').strip()}")
@@ -278,13 +407,13 @@ def has_sensitive_oauth_credentials(props):
 
 def fetch_neo_apps():
     all_apps = []
-    url = f"{LIFECYCLE_BASE}/accounts/{ACCOUNT}/apps"
+    url = _neo_url(NEO_LIFECYCLE_URL)
     while url:
         d = neo_get_json(url)
         page_apps = d.get("apps", [])
         all_apps.extend(page_apps)
         next_path = d.get("nextUrl")
-        url = (next_path if next_path.startswith("http") else f"https://{HOST}{next_path}") if next_path else None
+        url = _neo_url(next_path if next_path.startswith("http") else f"https://{HOST}{next_path}") if isinstance(next_path, str) and next_path else None
     return list(dict.fromkeys(
         a["entity"]["applicationName"] for a in all_apps
         if "entity" in a and "applicationName" in a["entity"]
@@ -301,15 +430,15 @@ def fetch_account_items():
     keystores = {}
 
     # Configuration API — destinations and keystores attached to destinations
-    items = parse_item_list(neo_get_text(f"{CONFIG_BASE}/connectivity/"))
+    items = parse_item_list(neo_get_text(_neo_url(f"{CONFIG_BASE}/connectivity/")))
     for name in items:
         if re.search(r'\.(jks|p12|pem|jceks)$', name, re.IGNORECASE):
             if MIGRATE_KEYSTORES:
-                data = neo_get_binary(f"{CONFIG_BASE}/connectivity/{name}")
+                data = neo_get_binary(_neo_url(f"{CONFIG_BASE}/connectivity/{name}"))
                 if data:
                     keystores[name] = data
         else:
-            content = neo_get_text(f"{CONFIG_BASE}/connectivity/{name}")
+            content = neo_get_text(_neo_url(f"{CONFIG_BASE}/connectivity/{name}"))
             if is_error_text(content):
                 continue
             props = parse_properties(content)
@@ -319,16 +448,16 @@ def fetch_account_items():
     # Keystore API — standalone keystores registered at account level
     if MIGRATE_KEYSTORES:
         try:
-            ks_data = neo_get_json(f"{KEYSTORE_BASE}/accounts/{ACCOUNT}")
+            ks_data = neo_get_json(_neo_url(f"{KEYSTORE_BASE}/accounts/{ACCOUNT}"))
             for ks in ks_data.get("keystores", []):
                 name = ks["name"]
-                hdrs = neo_get_headers(f"{KEYSTORE_BASE}/accounts/{ACCOUNT}/{name}")
+                hdrs = neo_get_headers(_neo_url(f"{KEYSTORE_BASE}/accounts/{ACCOUNT}/{name}"))
                 ext = next(
                     (l.split(":", 1)[1].strip() for l in hdrs.splitlines()
                      if l.lower().startswith("x-sap-keystore-type:")),
                     "jks"
                 ).strip() or "jks"
-                data = neo_get_binary(f"{KEYSTORE_BASE}/accounts/{ACCOUNT}/{name}")
+                data = neo_get_binary(_neo_url(f"{KEYSTORE_BASE}/accounts/{ACCOUNT}/{name}"))
                 if data:
                     keystores[f"{name}.{ext}"] = data
         except Exception:
@@ -349,16 +478,16 @@ def fetch_app_items(app):
     # Keystore API
     if MIGRATE_KEYSTORES:
         try:
-            ks_data = neo_get_json(f"{KEYSTORE_BASE}/accounts/{ACCOUNT}/apps/{app}")
+            ks_data = neo_get_json(_neo_url(f"{KEYSTORE_BASE}/accounts/{ACCOUNT}/apps/{app}"))
             for ks in ks_data.get("keystores", []):
                 name = ks["name"]
-                hdrs = neo_get_headers(f"{KEYSTORE_BASE}/accounts/{ACCOUNT}/apps/{app}/{name}")
+                hdrs = neo_get_headers(_neo_url(f"{KEYSTORE_BASE}/accounts/{ACCOUNT}/apps/{app}/{name}"))
                 ext = next(
                     (l.split(":", 1)[1].strip() for l in hdrs.splitlines()
                      if l.lower().startswith("x-sap-keystore-type:")),
                     "jks"
                 ).strip() or "jks"
-                data = neo_get_binary(f"{KEYSTORE_BASE}/accounts/{ACCOUNT}/apps/{app}/{name}")
+                data = neo_get_binary(_neo_url(f"{KEYSTORE_BASE}/accounts/{ACCOUNT}/apps/{app}/{name}"))
                 if data:
                     keystores[f"{name}.{ext}"] = data
         except Exception:
@@ -366,17 +495,17 @@ def fetch_app_items(app):
 
     # Destination API
     items = parse_item_list(
-        neo_get_text(f"{CONFIG_BASE}/appliances/{app}/components/web/base/connectivity/"))
+        neo_get_text(_neo_url(f"{CONFIG_BASE}/appliances/{app}/components/web/base/connectivity/")))
     for name in items:
         if re.search(r'\.(jks|p12|pem|jceks)$', name, re.IGNORECASE):
             if MIGRATE_KEYSTORES:
                 data = neo_get_binary(
-                    f"{CONFIG_BASE}/appliances/{app}/components/web/base/connectivity/{name}")
+                    _neo_url(f"{CONFIG_BASE}/appliances/{app}/components/web/base/connectivity/{name}"))
                 if data:
                     keystores[name] = data
         else:
             content = neo_get_text(
-                f"{CONFIG_BASE}/appliances/{app}/components/web/base/connectivity/{name}")
+                _neo_url(f"{CONFIG_BASE}/appliances/{app}/components/web/base/connectivity/{name}"))
             if is_error_text(content):
                 continue
             props = parse_properties(content)
@@ -574,4 +703,13 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    if "--list-apps" in sys.argv:
+        try:
+            app_names = fetch_neo_apps()
+        except RuntimeError as e:
+            print(f"ERROR fetching Neo app list: {e}", file=sys.stderr)
+            sys.exit(1)
+        for name in app_names:
+            print(name)
+    else:
+        main()

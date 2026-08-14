@@ -2,9 +2,10 @@
 name: subaccount-roles-import
 description: >-
   Assign Neo application roles and group memberships into a CF subaccount after apps
-  are deployed. Reads .migration/neo-roles.json (produced by subaccount-roles-export),
+  are deployed. Reads ~/.neo-migration/$SUBACCOUNT/$CF_SUBACCOUNT_GUID/neo-roles.json (produced by subaccount-roles-export),
   resolves live XSUAA appIds from deployed CF apps, adds role-templates from those apps
   to the role collections created by authentication-xsuaa, and assigns users via BTP CLI.
+  Consent files live under ~/.neo-migration-consents/$SUBACCOUNT/.
   Generates a manual checklist for unresolved apps, group role links, and the Everyone role.
   MUST run after all applications are deployed to CF.
 disable-model-invocation: false
@@ -33,7 +34,7 @@ This skill reads the structured roles export produced by `subaccount-roles-expor
 
 ## Prerequisites
 
-1. **`subaccount-roles-export` must have run** — `.migration/neo-roles.json` must exist
+1. **`subaccount-roles-export` must have run** — `~/.neo-migration/$SUBACCOUNT/$CF_SUBACCOUNT_GUID/neo-roles.json` must exist
 
 2. **All applications must be deployed to CF** — each app's `authentication-xsuaa` skill must have run, `xs-security.json` must be deployed, and `cf deploy . -f` must have completed successfully for every app
 
@@ -52,15 +53,31 @@ This skill reads the structured roles export produced by `subaccount-roles-expor
 
 ### Step 0: Resolve Required Parameters
 
-**0a. Read the export file:**
+**0a. Resolve subaccount directory:**
 
 ```bash
-cat .migration/neo-roles.json
+_NEO_MIGRATION_HOME="${XDG_DATA_HOME:-${APPDATA:-$HOME}}/.neo-migration"
+_NEO_CONSENTS_HOME="${XDG_DATA_HOME:-${APPDATA:-$HOME}}/.neo-migration-consents"
+export SUBACCOUNT="<Neo subaccount technical name>"
+_CF_ORG=$(cf target 2>/dev/null | awk '/^org:/{print $2}')
+CF_SUBACCOUNT_GUID=$(btp list accounts/subaccount 2>/dev/null | awk -v org="${_CF_ORG}" '
+  NR > 2 { guid=$1; subdomain=$3; if (index(org, subdomain) > 0) { print guid; exit } }
+')
+[ -n "${CF_SUBACCOUNT_GUID}" ] || { echo "ERROR: Could not resolve CF_SUBACCOUNT_GUID — check btp login and cf target." >&2; exit 1; }
+_SUBACCOUNT_DIR="${_NEO_MIGRATION_HOME}/${SUBACCOUNT}/${CF_SUBACCOUNT_GUID}"
+```
+
+> When invoked by `subaccount-migration-orchestrator`, `SUBACCOUNT` and `CF_SUBACCOUNT_GUID` are already known. When invoked standalone, `SUBACCOUNT` must be provided and `CF_SUBACCOUNT_GUID` is resolved automatically.
+
+**0b. Read the export file:**
+
+```bash
+cat "${_SUBACCOUNT_DIR}/neo-roles.json"
 ```
 
 If the file does not exist, stop and instruct the user to run `subaccount-roles-export` first.
 
-**0b. Check for existing CF config:**
+**0c. Check for existing CF config:**
 
 ```bash
 if [ -f .migration/cf-migration-config.json ]; then
@@ -80,11 +97,11 @@ if os.path.exists(path):
 " 2>/dev/null || echo "")
 ```
 
-**0b2. Read the trust import report to determine the IdP origin key:**
+**0d. Read the trust import report to determine the IdP origin key:**
 
 ```bash
-if [ -f .migration/neo-trust-import-report.json ]; then
-  cat .migration/neo-trust-import-report.json
+if [ -f "${_SUBACCOUNT_DIR}/neo-trust-import-report.json" ]; then
+  cat "${_SUBACCOUNT_DIR}/neo-trust-import-report.json"
 fi
 ```
 
@@ -92,25 +109,29 @@ Extract the `originKey` from the first successfully imported IdP:
 
 ```bash
 IDP_ORIGIN=$(python3 -c "
-import json, sys
-with open('.migration/neo-trust-import-report.json') as f:
-    report = json.load(f)
-imported = report.get('imported', [])
-already = report.get('alreadyConfigured', [])
-all_idps = imported + already
-print(all_idps[0]['originKey'] if all_idps else 'sap.default')
+import json, sys, os
+path = os.path.expanduser('~') + '/.neo-migration/${SUBACCOUNT}/${CF_SUBACCOUNT_GUID}/neo-trust-import-report.json'
+try:
+    with open(path) as f:
+        report = json.load(f)
+    imported = report.get('imported', [])
+    already = report.get('alreadyConfigured', [])
+    all_idps = imported + already
+    print(all_idps[0]['originKey'] if all_idps else 'sap.default')
+except Exception:
+    print('sap.default')
 " 2>/dev/null || echo "sap.default")
 ```
 
-If `.migration/neo-trust-import-report.json` does not exist or contains no imported IdPs, fall back to `sap.default` and note it in the report:
+If the file does not exist or contains no imported IdPs, fall back to `sap.default` and note it in the report:
 
 > "No trust migration report found — using `sap.default` as the IdP origin for user assignments. If users authenticate via a custom IdP, re-run this skill after completing `subaccount-trust-migrator`."
 
-**0c. Ask the user** for any values still missing:
+**0e. Ask the user** for any values still missing:
 
 1. "What is the GUID of the target CF subaccount?"
 
-**0d. Save CF config** if not already present:
+**0f. Save CF config** if not already present:
 
 Write `{ "cfSubaccountId": "<guid>" }` to `.migration/cf-migration-config.json` if it doesn't exist.
 
@@ -288,13 +309,13 @@ Collect all items that could not be automated:
 
 ## Step 6: Save Import Report
 
-Save to `.migration/neo-roles-import-report.json` using the Write tool:
+Save to `${_SUBACCOUNT_DIR}/neo-roles-import-report.json` using the Write tool:
 
 ```json
 {
   "targetSubaccount": "<CF subaccount GUID>",
   "importTimestamp": "<ISO 8601 timestamp>",
-  "sourceFile": ".migration/neo-roles.json",
+  "sourceFile": "${_SUBACCOUNT_DIR}/neo-roles.json",
   "idpOrigin": "<origin key used for user assignments, e.g. nss.migrated or sap.default>",
   "appsResolved": [
     { "name": "myapp", "appId": "myapp!t1234" }
@@ -349,17 +370,17 @@ Manual Steps Required: yes
   2. <step>
   ...
 
-Report saved to: .migration/neo-roles-import-report.json
+Report saved to: ${_SUBACCOUNT_DIR}/neo-roles-import-report.json
 ```
 
 ## Configuration Files
 
 | File | Location | Purpose |
 |------|----------|---------|
-| `neo-roles.json` | `.migration/` | Input — roles export from `subaccount-roles-export` |
-| `neo-trust-import-report.json` | `.migration/` | Input — trust import report; provides the IdP origin key for user assignments |
+| `neo-roles.json` | `~/.neo-migration/$SUBACCOUNT/$CF_SUBACCOUNT_GUID/` | Input — roles export from `subaccount-roles-export` |
+| `neo-trust-import-report.json` | `~/.neo-migration/$SUBACCOUNT/$CF_SUBACCOUNT_GUID/` | Input — trust import report; provides the IdP origin key for user assignments |
 | `cf-migration-config.json` | `.migration/` | CF target subaccount details |
-| `neo-roles-import-report.json` | `.migration/` | Output — assignment results and manual checklist |
+| `neo-roles-import-report.json` | `~/.neo-migration/$SUBACCOUNT/$CF_SUBACCOUNT_GUID/` | Output — assignment results and manual checklist |
 
 ## CF Services
 

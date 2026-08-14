@@ -160,6 +160,150 @@ cf target
 
 If either fails, stop and tell the user which CLI needs login.
 
+**0g. Setup NEO API (telemetry consent + functions):**
+
+> This must run **before** any subagent is dispatched. Do not proceed to Step 1 until all telemetry files exist.
+
+**Resolve telemetry paths:**
+
+```bash
+_NEO_MIGRATION_HOME="${XDG_DATA_HOME:-${APPDATA:-$HOME}}/.neo-migration"
+_NEO_CONSENTS_HOME="${XDG_DATA_HOME:-${APPDATA:-$HOME}}/.neo-migration-consents"
+_CF_ORG=$(cf target 2>/dev/null | awk '/^org:/{print $2}')
+CF_SUBACCOUNT_GUID=$(btp list accounts/subaccount 2>/dev/null | awk -v org="${_CF_ORG}" '
+  NR > 2 { guid=$1; subdomain=$3; if (index(org, subdomain) > 0) { print guid; exit } }
+')
+[ -n "${CF_SUBACCOUNT_GUID}" ] || { echo "ERROR: Could not resolve CF_SUBACCOUNT_GUID — check btp login and cf target." >&2; exit 1; }
+_SUBACCOUNT_DIR="${_NEO_MIGRATION_HOME}/${SUBACCOUNT}/${CF_SUBACCOUNT_GUID}"
+mkdir -p "${_NEO_MIGRATION_HOME}/${SUBACCOUNT}"
+mkdir -p "${_SUBACCOUNT_DIR}"
+mkdir -p "${_NEO_CONSENTS_HOME}/${SUBACCOUNT}/${CF_SUBACCOUNT_GUID}"
+_TELEMETRY_FILE="${_NEO_CONSENTS_HOME}/neo-telemetry-installation.txt"
+_CONSENT_FILE="${_NEO_CONSENTS_HOME}/${SUBACCOUNT}/neo-telemetry-consent.txt"
+_SESSION_FILE="${_NEO_CONSENTS_HOME}/${SUBACCOUNT}/${CF_SUBACCOUNT_GUID}/neo-telemetry-session.txt"
+_SP_SIGNING_CONSENT_FILE="${_NEO_CONSENTS_HOME}/${SUBACCOUNT}/trust-sp-signing-consent.txt"
+_KEYSTORES_CONSENT_FILE="${_NEO_CONSENTS_HOME}/${SUBACCOUNT}/dest-keystores-consent.txt"
+_OAUTH_CREDENTIALS_CONSENT_FILE="${_NEO_CONSENTS_HOME}/${SUBACCOUNT}/dest-oauth-credentials-consent.txt"
+```
+
+**Collect telemetry consent (per subaccount — ask only if not already recorded):**
+
+> **STOP — do not run any bash here.** Check whether `$_CONSENT_FILE` exists:
+> - If it exists and contains a valid `consent=` line, read the value from there (skip asking the user).
+> - If it does not exist or `consent=` is missing, use the `AskUserQuestion` tool to ask the user:
+>   **"Enable telemetry? This migration appends two non-PII random UUIDs (neo_cf_migration_installation_id, neo_cf_migration_session_id) as query parameters to every NEO API call for usage tracking. No personal data, subaccount names, or credentials are included. Enable? (yes/no)"**
+>   Wait for the user's answer before continuing.
+
+```bash
+if [ ! -f "${_CONSENT_FILE}" ] || ! grep -q "^consent=" "${_CONSENT_FILE}"; then
+  _CONSENT="<yes or no from user answer above>"   # replace with actual value
+  echo "consent=${_CONSENT}" > "${_CONSENT_FILE}"
+fi
+_CONSENT=$(grep "^consent=" "${_CONSENT_FILE}" | cut -d= -f2)
+```
+
+**Ensure installation_id exists and generate new session_id:**
+
+```bash
+if [ "${_CONSENT}" = "yes" ]; then
+  # installation_id — once per machine
+  if [ ! -f "${_TELEMETRY_FILE}" ] || ! grep -q "^neo_cf_migration_installation_id=" "${_TELEMETRY_FILE}"; then
+    _INSTALLATION_ID=$(python3 -c "import uuid; print(uuid.uuid4())")
+    echo "neo_cf_migration_installation_id=${_INSTALLATION_ID}" > "${_TELEMETRY_FILE}"
+    echo "INFO: New installation ID generated: ${_INSTALLATION_ID}"
+  fi
+
+  # session_id — ALWAYS new (orchestrator = new migration attempt)
+  _MIGRATION_ID=$(python3 -c "import uuid; print(uuid.uuid4())")
+  echo "neo_cf_migration_session_id=${_MIGRATION_ID}" > "${_SESSION_FILE}"
+  echo "INFO: New migration session started. neo_cf_migration_session_id: ${_MIGRATION_ID}"
+fi
+```
+
+**Collect SP signing key consent (per subaccount — ask only if not already recorded):**
+
+> **STOP — do not run any bash here.** Check whether `$_SP_SIGNING_CONSENT_FILE` exists:
+> - If it exists and contains a valid `consent=` line, read the value from there (skip asking the user).
+> - If it does not exist or `consent=` is missing, use the `AskUserQuestion` tool to present this disclaimer and ask the user:
+>   **"The Neo trust configuration includes the signing key of the local service provider (SP). This key flows through the migration script in memory and there is a small risk it may reach this LLM model. Do you want to proceed with the trust migration? (yes/no)"**
+>   Wait for the user's answer before continuing.
+
+```bash
+if [ ! -f "${_SP_SIGNING_CONSENT_FILE}" ] || ! grep -q "^consent=" "${_SP_SIGNING_CONSENT_FILE}"; then
+  _SP_SIGNING_CONSENT="<yes or no from user answer above>"   # replace with actual value
+  echo "consent=${_SP_SIGNING_CONSENT}" > "${_SP_SIGNING_CONSENT_FILE}"
+fi
+_SP_SIGNING_CONSENT=$(grep "^consent=" "${_SP_SIGNING_CONSENT_FILE}" | cut -d= -f2)
+```
+
+**Collect OAuth credentials consent (per subaccount — ask only if not already recorded):**
+
+> **STOP — do not run any bash here.** Check whether `$_OAUTH_CREDENTIALS_CONSENT_FILE` exists:
+> - If it exists and contains a valid `consent=` line, read the value from there (skip asking the user).
+> - If it does not exist or `consent=` is missing, use the `AskUserQuestion` tool to present this disclaimer and ask the user:
+>   **"Two destination authentication types (OAuth2SAMLBearerAssertion and OAuth2ClientCredentials with mTLS token retrieval) have credentials that can be extracted from Neo. There is a risk they may reach this LLM model. Do you want to migrate these destinations including their credentials? (yes/no)"**
+>   Wait for the user's answer before continuing.
+
+```bash
+if [ ! -f "${_OAUTH_CREDENTIALS_CONSENT_FILE}" ] || ! grep -q "^consent=" "${_OAUTH_CREDENTIALS_CONSENT_FILE}"; then
+  _OAUTH_CREDENTIALS_CONSENT="<yes or no from user answer above>"   # replace with actual value
+  echo "consent=${_OAUTH_CREDENTIALS_CONSENT}" > "${_OAUTH_CREDENTIALS_CONSENT_FILE}"
+fi
+_OAUTH_CREDENTIALS_CONSENT=$(grep "^consent=" "${_OAUTH_CREDENTIALS_CONSENT_FILE}" | cut -d= -f2)
+```
+
+**Collect keystores consent (per subaccount — ask only if not already recorded):**
+
+> **STOP — do not run any bash here.** Check whether `$_KEYSTORES_CONSENT_FILE` exists:
+> - If it exists and contains a valid `consent=` line, read the value from there (skip asking the user).
+> - If it does not exist or `consent=` is missing, use the `AskUserQuestion` tool to present this disclaimer and ask the user:
+>   **"Keystores contain sensitive cryptographic information such as private keys. There is a risk they may reach this LLM model during migration. Do you want to migrate keystores? (yes/no)"**
+>   Wait for the user's answer before continuing.
+
+```bash
+if [ ! -f "${_KEYSTORES_CONSENT_FILE}" ] || ! grep -q "^consent=" "${_KEYSTORES_CONSENT_FILE}"; then
+  _KEYSTORES_CONSENT="<yes or no from user answer above>"   # replace with actual value
+  echo "consent=${_KEYSTORES_CONSENT}" > "${_KEYSTORES_CONSENT_FILE}"
+fi
+_KEYSTORES_CONSENT=$(grep "^consent=" "${_KEYSTORES_CONSENT_FILE}" | cut -d= -f2)
+```
+
+**Source the NEO API setup script:**
+
+```bash
+_NEO_SETUP="$(cd "$(dirname "${BASH_SOURCE[0]}")" && cd ../../shared && pwd)/neo-api-setup-template.sh"
+[ -f "${_NEO_SETUP}" ] || _NEO_SETUP="ai-migration/neo-java-migration-skills/shared/neo-api-setup-template.sh"
+source "${_NEO_SETUP}" || exit 1
+echo "INFO: NEO API setup complete. fetch_neo_*() functions are ready."
+```
+
+**Guard — do not dispatch any subagent without all consent files:**
+
+```bash
+[ -f "${_CONSENT_FILE}" ] || {
+  echo "ERROR: Telemetry consent file not written. Cannot dispatch subagents." >&2
+  exit 1
+}
+if [ "${_CONSENT}" = "yes" ]; then
+  [ -f "${_SESSION_FILE}" ] || {
+    echo "ERROR: Session file not written. Cannot dispatch subagents." >&2
+    exit 1
+  }
+fi
+[ -f "${_SP_SIGNING_CONSENT_FILE}" ] || {
+  echo "ERROR: SP signing key consent file not written. Cannot dispatch subagents." >&2
+  exit 1
+}
+[ -f "${_OAUTH_CREDENTIALS_CONSENT_FILE}" ] || {
+  echo "ERROR: OAuth credentials consent file not written. Cannot dispatch subagents." >&2
+  exit 1
+}
+[ -f "${_KEYSTORES_CONSENT_FILE}" ] || {
+  echo "ERROR: Keystores consent file not written. Cannot dispatch subagents." >&2
+  exit 1
+}
+```
+
 ## Step 1: Trust Migration
 
 Inform the user:
@@ -184,12 +328,8 @@ Neo subaccount: <NEO_SUBACCOUNT>
 Neo region host: <NEO_REGION_HOST>
 CF subaccount ID: <CF_SUBACCOUNT_ID>
 
-The user has already acknowledged the SP signing key disclaimer:
-CONSENT_SP_SIGNING_KEY=true
-
 Your task:
 1. Invoke the subaccount-trust-migrator skill and follow it exactly.
-   - The user has already answered the disclaimer — do not re-ask it, proceed directly to collecting inputs.
    - Collect the Neo Bearer token from the user if not already available.
 2. Run the migration script. Do NOT write any files.
 3. Return a concise report (≤ 15 lines):
@@ -236,12 +376,12 @@ Prompt:
 ```
 You are running the subaccount-roles-export skill of the Neo→CF subaccount migration.
 
-Migration directory: <MIGRATION_DIR>
+Subaccount directory: <SUBACCOUNT_DIR>
 Neo subaccount config: <MIGRATION_DIR>/neo-migration-config.json
 
 Your task:
 1. Invoke the subaccount-roles-export skill and follow it exactly.
-2. Write the export JSON to <MIGRATION_DIR>/neo-roles.json.
+2. Write the export JSON to <SUBACCOUNT_DIR>/neo-roles.json.
 3. Return a concise report (≤ 20 lines):
    - Output file path
    - totalApplications, totalRoles, totalGroups
@@ -255,20 +395,21 @@ Your final message IS the return value.
 ### Step 3b: Read summary fields inline
 
 ```bash
-jq '.totalApplications, .totalRoles, .totalGroups' "$MIGRATION_DIR/neo-roles.json"
+jq '.totalApplications, .totalRoles, .totalGroups' "${_SUBACCOUNT_DIR}/neo-roles.json"
 ```
 
 > **Roles import is deferred.** `subaccount-roles-import` requires live XSUAA `appId` values that only exist after apps are deployed to CF. After completing app code migration (Phase 2 in `neo-to-cf-migration-orchestrator`) and deploying all apps (Phase 4), run `subaccount-roles-import` as a final step to link role-templates and assign users. See the **Full Subaccount Migration Order** section in `neo-to-cf-migration-orchestrator` for the complete sequence.
 
 ## Step 4: Build Consolidated Report
 
-Read the roles export JSON and combine with the trust subagent summary returned in Step 1. Save to `$MIGRATION_DIR/subaccount-migration-report.json` using the Write tool:
+Read all individual reports and build a summary. Save to `${_SUBACCOUNT_DIR}/subaccount-migration-report.json` using the Write tool:
 
 ```json
 {
-  "migrationDir": "<MIGRATION_DIR>",
+  "subaccountDir": "<_SUBACCOUNT_DIR>",
   "sourceSubaccount": "<Neo subaccount name>",
   "targetSubaccount": "<CF subaccount GUID>",
+  "migrationSessionId": "<neo_cf_migration_session_id>",
   "migrationTimestamp": "<ISO 8601 timestamp>",
   "trust": {
     "status": "completed|failed|skipped",
@@ -284,7 +425,7 @@ Read the roles export JSON and combine with the trust subagent summary returned 
     "totalApplications": 0,
     "totalRoles": 0,
     "totalGroups": 0,
-    "reportFile": "<MIGRATION_DIR>/neo-roles.json"
+    "reportFile": "<_SUBACCOUNT_DIR>/neo-roles.json"
   },
   "requiresManualSteps": true,
   "consolidatedManualSteps": [
@@ -333,9 +474,9 @@ DESTINATIONS:
 ROLES:
   4. Run subaccount-roles-import after all apps are deployed to CF
 
-Full report: $MIGRATION_DIR/subaccount-migration-report.json
+Full report: ${_SUBACCOUNT_DIR}/subaccount-migration-report.json
 Individual reports:
-  Roles export: $MIGRATION_DIR/neo-roles.json
+  Roles export: ${_SUBACCOUNT_DIR}/neo-roles.json
 
 NEXT STEPS:
   1. Complete all manual steps listed above
@@ -349,11 +490,17 @@ NEXT STEPS:
 
 | File | Location | Purpose |
 |------|----------|---------|
+| `neo-telemetry-installation.txt` | `~/.neo-migration-consents/` | Machine-level installation ID |
+| `neo-telemetry-consent.txt` | `~/.neo-migration-consents/$SUBACCOUNT/` | Telemetry consent for this subaccount |
+| `neo-telemetry-session.txt` | `~/.neo-migration-consents/$SUBACCOUNT/$CF_SUBACCOUNT_GUID/` | Session ID for the current migration attempt |
+| `trust-sp-signing-consent.txt` | `~/.neo-migration-consents/$SUBACCOUNT/` | SP signing key consent for trust migration |
+| `dest-keystores-consent.txt` | `~/.neo-migration-consents/$SUBACCOUNT/` | Keystores migration consent |
+| `dest-oauth-credentials-consent.txt` | `~/.neo-migration-consents/$SUBACCOUNT/` | OAuth credentials migration consent |
 | `neo-migration-config.json` | `$MIGRATION_DIR` | Neo subaccount details and auth credentials |
 | `cf-migration-config.json` | `$MIGRATION_DIR` | CF target subaccount details |
-| `subaccount-migration-report.json` | `$MIGRATION_DIR` | Consolidated migration report |
-| `neo-roles.json` | `$MIGRATION_DIR` | Roles export output |
-| `neo-roles-import-report.json` | `$MIGRATION_DIR` | Roles import results |
+| `subaccount-migration-report.json` | `~/.neo-migration/$SUBACCOUNT/$CF_SUBACCOUNT_GUID/` | Consolidated migration report |
+| `neo-roles.json` | `~/.neo-migration/$SUBACCOUNT/$CF_SUBACCOUNT_GUID/` | Roles export output |
+| `neo-roles-import-report.json` | `~/.neo-migration/$SUBACCOUNT/$CF_SUBACCOUNT_GUID/` | Roles import results |
 
 ## CF Services
 

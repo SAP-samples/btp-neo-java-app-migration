@@ -4,7 +4,7 @@ description: >-
   Export application roles, groups, and user assignments from a Neo subaccount. Uses
   the public Neo Authorization Management REST API to fetch all application roles with
   their user assignments, all groups with their role and user assignments, and saves a
-  structured JSON report to .migration/neo-roles.json with migration notes for CF.
+  structured JSON report to ~/.neo-migration/$SUBACCOUNT/$CF_SUBACCOUNT_GUID/neo-roles.json with migration notes for CF.
   Invoke when migrating authorization configuration from a Neo subaccount to Cloud
   Foundry, or when you need to understand what roles and groups are configured.
 disable-model-invocation: false
@@ -23,7 +23,7 @@ This skill exports all application roles, groups, and their user and role assign
 - Fetches user assignments for each role
 - Lists all groups and fetches their role and user assignments
 - Generates migration notes explaining the Neo → CF authorization model differences
-- Saves structured output to `$MIGRATION_DIR/neo-roles.json` for downstream skills
+- Saves structured output to `$_SUBACCOUNT_DIR/neo-roles.json` for downstream skills
 
 This skill is **read-only** — it does NOT create anything in CF. The companion `subaccount-roles-import` skill consumes the output.
 
@@ -79,6 +79,26 @@ Read the following fields if present:
 - `auth.clientId` + `auth.clientSecret` → if method is clientCredentials
 - `auth.bearerToken` → if method is bearerToken
 
+After reading, export the values explicitly:
+
+```bash
+export SUBACCOUNT=$(jq -r '.neoSubaccount' "$MIGRATION_DIR/neo-migration-config.json")
+export REGION_HOST=$(jq -r '.neoRegionHost' "$MIGRATION_DIR/neo-migration-config.json")
+
+_NEO_MIGRATION_HOME="${XDG_DATA_HOME:-${APPDATA:-$HOME}}/.neo-migration"
+_CF_ORG=$(cf target 2>/dev/null | awk '/^org:/{print $2}')
+CF_SUBACCOUNT_GUID=$(btp list accounts/subaccount 2>/dev/null | awk -v org="${_CF_ORG}" '
+  NR > 2 {
+    guid=$1; subdomain=$3
+    if (index(org, subdomain) > 0) { print guid; exit }
+  }
+')
+[ -n "${CF_SUBACCOUNT_GUID}" ] || { echo "ERROR: Could not resolve CF_SUBACCOUNT_GUID — check btp login and cf target." >&2; exit 1; }
+_SUBACCOUNT_DIR="${_NEO_MIGRATION_HOME}/${SUBACCOUNT}/${CF_SUBACCOUNT_GUID}"
+mkdir -p "${_NEO_MIGRATION_HOME}/${SUBACCOUNT}"
+mkdir -p "${_SUBACCOUNT_DIR}"
+```
+
 **0c. Check the user's prompt** for any values provided inline.
 
 **0d. If any required value is still missing**, invoke the **`subaccount-migration-orchestrator`** skill to collect all inputs and write `$MIGRATION_DIR/neo-migration-config.json`, then return here and continue from Step 1.
@@ -101,8 +121,6 @@ fi
 
 **Base URLs for this skill:**
 - Token endpoint: `https://api.${REGION_HOST}/oauth2/apitoken/v1`
-- Authorization API: `https://api.${REGION_HOST}/authorization/v1`
-- Lifecycle API (for app list): `https://api.${REGION_HOST}/lifecycle/v1`
 
 **If using client credentials:**
 
@@ -127,17 +145,90 @@ If `BEARER_TOKEN` is empty, check the response for errors:
 
 **If using pre-issued token:** Use it directly. Warn about 25-minute expiry.
 
+## Step 1b: Setup NEO API (telemetry + functions)
+
+> **This step is mandatory before any NEO API call.** It writes telemetry files, then sources `neo-api-setup-template.sh` which exports all NEO API URLs and `fetch_neo_*()` functions.
+
+**Resolve telemetry paths:**
+
+```bash
+_NEO_MIGRATION_HOME="${XDG_DATA_HOME:-${APPDATA:-$HOME}}/.neo-migration"
+_NEO_CONSENTS_HOME="${XDG_DATA_HOME:-${APPDATA:-$HOME}}/.neo-migration-consents"
+if [ -z "${CF_SUBACCOUNT_GUID}" ]; then
+  _CF_ORG=$(cf target 2>/dev/null | awk '/^org:/{print $2}')
+  CF_SUBACCOUNT_GUID=$(btp list accounts/subaccount 2>/dev/null | awk -v org="${_CF_ORG}" '
+    NR > 2 { guid=$1; subdomain=$3; if (index(org, subdomain) > 0) { print guid; exit } }
+  ')
+  [ -n "${CF_SUBACCOUNT_GUID}" ] || { echo "ERROR: Could not resolve CF_SUBACCOUNT_GUID — check btp login and cf target." >&2; exit 1; }
+fi
+_SUBACCOUNT_DIR="${_NEO_MIGRATION_HOME}/${SUBACCOUNT}/${CF_SUBACCOUNT_GUID}"
+mkdir -p "${_NEO_MIGRATION_HOME}/${SUBACCOUNT}"
+mkdir -p "${_SUBACCOUNT_DIR}"
+mkdir -p "${_NEO_CONSENTS_HOME}/${SUBACCOUNT}/${CF_SUBACCOUNT_GUID}"
+_TELEMETRY_FILE="${_NEO_CONSENTS_HOME}/neo-telemetry-installation.txt"
+_CONSENT_FILE="${_NEO_CONSENTS_HOME}/${SUBACCOUNT}/neo-telemetry-consent.txt"
+_SESSION_FILE="${_NEO_CONSENTS_HOME}/${SUBACCOUNT}/${CF_SUBACCOUNT_GUID}/neo-telemetry-session.txt"
+```
+
+> Note: `CF_SUBACCOUNT_GUID` is resolved in Step 0b if available; this block re-resolves it as a fallback for standalone runs.
+
+**Collect consent (per subaccount — ask only if not already recorded):**
+
+> **STOP — do not run any bash here.** Check whether `$_CONSENT_FILE` exists:
+> - If it exists and contains a valid `consent=` line, read the value from there and skip to "Ensure installation_id".
+> - If it does not exist or `consent=` is missing, use the `AskUserQuestion` tool to ask the user:
+>   **"Enable telemetry? This migration appends two non-PII random UUIDs (neo_cf_migration_installation_id, neo_cf_migration_session_id) as query parameters to every NEO API call for usage tracking. No personal data, subaccount names, or credentials are included. Enable? (yes/no)"**
+>   Wait for the user's answer before continuing.
+
+```bash
+if [ ! -f "${_CONSENT_FILE}" ] || ! grep -q "^consent=" "${_CONSENT_FILE}"; then
+  _CONSENT="<yes or no from user answer above>"   # replace with actual value
+  echo "consent=${_CONSENT}" > "${_CONSENT_FILE}"
+fi
+_CONSENT=$(grep "^consent=" "${_CONSENT_FILE}" | cut -d= -f2)
+```
+
+```bash
+if [ "${_CONSENT}" = "yes" ]; then
+  # installation_id — once per machine
+  if [ ! -f "${_TELEMETRY_FILE}" ] || ! grep -q "^neo_cf_migration_installation_id=" "${_TELEMETRY_FILE}"; then
+    _INSTALLATION_ID=$(python3 -c "import uuid; print(uuid.uuid4())")
+    echo "neo_cf_migration_installation_id=${_INSTALLATION_ID}" > "${_TELEMETRY_FILE}"
+  fi
+
+  # session_id — reuse if present (standalone run continues existing session)
+  if [ ! -f "${_SESSION_FILE}" ]; then
+    _MIGRATION_ID=$(python3 -c "import uuid; print(uuid.uuid4())")
+    echo "neo_cf_migration_session_id=${_MIGRATION_ID}" > "${_SESSION_FILE}"
+    echo "INFO: New migration session started. neo_cf_migration_session_id: ${_MIGRATION_ID}"
+  else
+    _MIGRATION_ID=$(grep "^neo_cf_migration_session_id=" "${_SESSION_FILE}" | cut -d= -f2)
+    echo "INFO: Resuming migration session. neo_cf_migration_session_id: ${_MIGRATION_ID}"
+  fi
+fi
+```
+
+**Source the NEO API setup script:**
+
+```bash
+_NEO_SETUP="$(cd "$(dirname "${BASH_SOURCE[0]}")" && cd ../../shared && pwd)/neo-api-setup-template.sh"
+[ -f "${_NEO_SETUP}" ] || _NEO_SETUP="ai-migration/neo-java-migration-skills/shared/neo-api-setup-template.sh"
+source "${_NEO_SETUP}" || exit 1
+```
+
 ## Step 2: Fetch Application List
 
 Use the Neo Lifecycle API to get all deployed applications:
 
 ```bash
+declare -f fetch_neo_apps > /dev/null 2>&1 || {
+  echo "ERROR: NEO API functions not loaded — collect telemetry consent and source neo-api-setup-template.sh before making any NEO API calls." >&2
+  exit 1
+}
+
 export MSYS_NO_PATHCONV=1
 
-APPS_RESPONSE=$(curl -s -w "\n%{http_code}" \
-  "https://api.${REGION_HOST}/lifecycle/v1/accounts/${SUBACCOUNT}/apps" \
-  -H "Authorization: Bearer ${BEARER_TOKEN}" \
-  -H "Accept: application/json")
+APPS_RESPONSE=$(fetch_neo_apps)
 
 HTTP_STATUS=$(echo "$APPS_RESPONSE" | tail -1 | tr -d '\r')
 APPS_BODY=$(echo "$APPS_RESPONSE" | sed '$d' | tr -d '\r')
@@ -146,7 +237,7 @@ APPS_BODY=$(echo "$APPS_RESPONSE" | sed '$d' | tr -d '\r')
 Extract application names:
 
 ```bash
-APP_NAMES=$(echo "$APPS_BODY" | jq -r '.[] | .applicationName // .name // empty' 2>/dev/null)
+APP_NAMES=$(echo "$APPS_BODY" | jq -r '.apps[].entity.applicationName // .[].applicationName // .[].name // empty' 2>/dev/null)
 ```
 
 **Note:** If the Lifecycle API is unavailable or returns an empty list, still proceed to fetch groups (Step 4). The roles export will have an empty applications array, which is valid.
@@ -158,34 +249,44 @@ For each application name from Step 2:
 **3a. Fetch roles for the application:**
 
 ```bash
-ROLES_RESPONSE=$(curl -s -w "\n%{http_code}" \
-  "https://api.${REGION_HOST}/authorization/v1/accounts/${SUBACCOUNT}/apps/${APP_NAME}/roles" \
-  -H "Authorization: Bearer ${BEARER_TOKEN}" \
-  -H "Accept: application/json")
+declare -f fetch_neo_roles > /dev/null 2>&1 || {
+  echo "ERROR: NEO API functions not loaded — collect telemetry consent and source neo-api-setup-template.sh before making any NEO API calls." >&2
+  exit 1
+}
+ROLES_RESPONSE=$(fetch_neo_roles "${APP_NAME}")
 ```
 
-The response is a JSON array of role objects:
+The response is a JSON object wrapping a roles array:
 ```json
-[
-  { "name": "Admin", "applicationRole": true, "shared": false }
-]
+{
+  "roles": [
+    { "name": "Admin", "type": "PREDEFINED", "applicationRole": true, "shared": true }
+  ]
+}
 ```
+
+Extract role names: `echo "$ROLES_BODY" | jq -r '.roles[].name // .[] .name // empty'`
 
 **3b. For each role, fetch its user assignments:**
 
 ```bash
-USERS_RESPONSE=$(curl -s \
-  "https://api.${REGION_HOST}/authorization/v1/accounts/${SUBACCOUNT}/apps/${APP_NAME}/roles/users?roleName=${ROLE_NAME}" \
-  -H "Authorization: Bearer ${BEARER_TOKEN}" \
-  -H "Accept: application/json")
+declare -f fetch_neo_role_users > /dev/null 2>&1 || {
+  echo "ERROR: NEO API functions not loaded — collect telemetry consent and source neo-api-setup-template.sh before making any NEO API calls." >&2
+  exit 1
+}
+USERS_RESPONSE=$(fetch_neo_role_users "${APP_NAME}" "${ROLE_NAME}")
 ```
 
-The response is a JSON array of user objects:
+The response is a JSON object wrapping a users array. The user identifier field is `name`:
 ```json
-[
-  { "userId": "john.doe@example.com" }
-]
+{
+  "users": [
+    { "name": "p000000" }
+  ]
+}
 ```
+
+Extract user names: `echo "$USERS_BODY" | jq -r '.users[].name // .[].userId // .[].name // empty'`
 
 Extract user IDs into an array for the role.
 
@@ -196,50 +297,66 @@ Extract user IDs into an array for the role.
 **4a. Fetch all groups:**
 
 ```bash
-GROUPS_RESPONSE=$(curl -s -w "\n%{http_code}" \
-  "https://api.${REGION_HOST}/authorization/v1/accounts/${SUBACCOUNT}/groups" \
-  -H "Authorization: Bearer ${BEARER_TOKEN}" \
-  -H "Accept: application/json")
+declare -f fetch_neo_groups > /dev/null 2>&1 || {
+  echo "ERROR: NEO API functions not loaded — collect telemetry consent and source neo-api-setup-template.sh before making any NEO API calls." >&2
+  exit 1
+}
+GROUPS_RESPONSE=$(fetch_neo_groups)
 ```
 
-Response: JSON array of group objects:
+Response: JSON object wrapping a groups array:
 ```json
-[
-  { "name": "managers" },
-  { "name": "viewers" }
-]
+{
+  "groups": [
+    { "name": "managers" },
+    { "name": "viewers" }
+  ]
+}
 ```
+
+Extract group names: `echo "$GROUPS_BODY" | jq -r '.groups[].name // empty'`
 
 **4b. For each group, fetch role assignments:**
 
 ```bash
-GROUP_ROLES_RESPONSE=$(curl -s \
-  "https://api.${REGION_HOST}/authorization/v1/accounts/${SUBACCOUNT}/groups/roles?groupName=${GROUP_NAME}" \
-  -H "Authorization: Bearer ${BEARER_TOKEN}" \
-  -H "Accept: application/json")
+declare -f fetch_neo_group_roles > /dev/null 2>&1 || {
+  echo "ERROR: NEO API functions not loaded — collect telemetry consent and source neo-api-setup-template.sh before making any NEO API calls." >&2
+  exit 1
+}
+GROUP_ROLES_RESPONSE=$(fetch_neo_group_roles "${GROUP_NAME}")
 ```
 
-Response: JSON array of role objects:
+Response: JSON object wrapping a roles array:
 ```json
-[
-  { "name": "Admin", "applicationName": "myapp", "providerAccount": "myaccount" }
-]
+{
+  "roles": [
+    { "name": "Admin", "applicationName": "myapp", "providerAccount": "myaccount" }
+  ]
+}
 ```
 
 **4c. For each group, fetch user assignments:**
 
 ```bash
-GROUP_USERS_RESPONSE=$(curl -s \
-  "https://api.${REGION_HOST}/authorization/v1/accounts/${SUBACCOUNT}/groups/users?groupName=${GROUP_NAME}" \
-  -H "Authorization: Bearer ${BEARER_TOKEN}" \
-  -H "Accept: application/json")
+declare -f fetch_neo_group_users > /dev/null 2>&1 || {
+  echo "ERROR: NEO API functions not loaded — collect telemetry consent and source neo-api-setup-template.sh before making any NEO API calls." >&2
+  exit 1
+}
+GROUP_USERS_RESPONSE=$(fetch_neo_group_users "${GROUP_NAME}")
 ```
 
-Response: JSON array of user objects.
+Response: JSON object wrapping a users array (same schema as role users — field is `name`):
+```json
+{
+  "users": [
+    { "name": "p000000" }
+  ]
+}
+```
 
 ## Step 5: Build and Save Output
 
-Construct the output JSON and save to `$MIGRATION_DIR/neo-roles.json` using the Write tool:
+Construct the output JSON and save to `$_SUBACCOUNT_DIR/neo-roles.json` using the Write tool:
 
 ```json
 {
@@ -313,7 +430,7 @@ Note: Neo roles are flat per-application. CF requires a redesign into
       scopes + role-templates + role-collections (done via authentication-xsuaa).
       subaccount-roles-import will create role collections as a best-effort mapping.
 
-Output saved to: $MIGRATION_DIR/neo-roles.json
+Output saved to: $_SUBACCOUNT_DIR/neo-roles.json
 ```
 
 ## Configuration Files
@@ -321,7 +438,7 @@ Output saved to: $MIGRATION_DIR/neo-roles.json
 | File | Location | Purpose |
 |------|----------|---------|
 | `neo-migration-config.json` | `$MIGRATION_DIR` | Shared input config — Neo subaccount details and auth credentials |
-| `neo-roles.json` | `$MIGRATION_DIR` | Output — roles, groups, and user assignments with migration notes |
+| `neo-roles.json` | `$_SUBACCOUNT_DIR` | Output — roles, groups, and user assignments with migration notes |
 
 ## CF Services
 
@@ -331,22 +448,22 @@ None — this skill is read-only.
 
 1. Verify output file exists:
    ```bash
-   ls -la $MIGRATION_DIR/neo-roles.json
+   ls -la $_SUBACCOUNT_DIR/neo-roles.json
    ```
 
 2. List all applications and their roles:
    ```bash
-   jq '.applications[] | {app: .name, roles: [.roles[].name]}' $MIGRATION_DIR/neo-roles.json
+   jq '.applications[] | {app: .name, roles: [.roles[].name]}' $_SUBACCOUNT_DIR/neo-roles.json
    ```
 
 3. List all groups:
    ```bash
-   jq '.groups[] | {group: .name, roles: [.roleAssignments[].roleName], users: .userAssignments}' $MIGRATION_DIR/neo-roles.json
+   jq '.groups[] | {group: .name, roles: [.roleAssignments[].roleName], users: .userAssignments}' $_SUBACCOUNT_DIR/neo-roles.json
    ```
 
 4. Check migration summary:
    ```bash
-   jq '.migrationSummary' $MIGRATION_DIR/neo-roles.json
+   jq '.migrationSummary' $_SUBACCOUNT_DIR/neo-roles.json
    ```
 
 ## Common Issues
@@ -374,6 +491,6 @@ None — this skill is read-only.
 
 After completing this skill:
 
-- **[subaccount-roles-import](../subaccount-roles-import/SKILL.md)** — reads `$MIGRATION_DIR/neo-roles.json` and creates CF role collections with user assignments
+- **[subaccount-roles-import](../subaccount-roles-import/SKILL.md)** — reads `$_SUBACCOUNT_DIR/neo-roles.json` and creates CF role collections with user assignments
 - **[authentication-xsuaa](../authentication-xsuaa/SKILL.md)** — for each application, define proper XSUAA scopes and role-templates; the role collections created by `subaccount-roles-import` can then be extended with application scopes
 - **[subaccount-trust-migrator](../subaccount-trust-migrator/SKILL.md)** — if not done, migrate IdP trust configuration (group-based access rules may depend on the IdP configuration)

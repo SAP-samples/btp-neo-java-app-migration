@@ -127,7 +127,100 @@ btp target
 
 Show the output to the user and confirm the correct global account and subaccount are targeted before continuing.
 
+## Step 1b: Setup NEO API (telemetry + functions)
+
+> **This step is mandatory before any NEO API call.** It sets up telemetry consent and loads the `fetch_neo_*()` functions used in all subsequent steps.
+
+```bash
+_NEO_MIGRATION_HOME="${XDG_DATA_HOME:-${APPDATA:-$HOME}}/.neo-migration"
+_NEO_CONSENTS_HOME="${XDG_DATA_HOME:-${APPDATA:-$HOME}}/.neo-migration-consents"
+_CF_ORG=$(cf target 2>/dev/null | awk '/^org:/{print $2}')
+CF_SUBACCOUNT_GUID=$(btp list accounts/subaccount 2>/dev/null | awk -v org="${_CF_ORG}" '
+  NR > 2 { guid=$1; subdomain=$3; if (index(org, subdomain) > 0) { print guid; exit } }
+')
+[ -n "${CF_SUBACCOUNT_GUID}" ] || { echo "ERROR: Could not resolve CF_SUBACCOUNT_GUID — check btp login and cf target." >&2; exit 1; }
+_SUBACCOUNT_DIR="${_NEO_MIGRATION_HOME}/${NEO_SUBACCOUNT}/${CF_SUBACCOUNT_GUID}"
+mkdir -p "${_NEO_MIGRATION_HOME}/${NEO_SUBACCOUNT}"
+mkdir -p "${_SUBACCOUNT_DIR}"
+mkdir -p "${_NEO_CONSENTS_HOME}/${NEO_SUBACCOUNT}/${CF_SUBACCOUNT_GUID}"
+_TELEMETRY_FILE="${_NEO_CONSENTS_HOME}/neo-telemetry-installation.txt"
+_CONSENT_FILE="${_NEO_CONSENTS_HOME}/${NEO_SUBACCOUNT}/neo-telemetry-consent.txt"
+_SESSION_FILE="${_NEO_CONSENTS_HOME}/${NEO_SUBACCOUNT}/${CF_SUBACCOUNT_GUID}/neo-telemetry-session.txt"
+_SP_SIGNING_CONSENT_FILE="${_NEO_CONSENTS_HOME}/${NEO_SUBACCOUNT}/trust-sp-signing-consent.txt"
+```
+
+**Collect telemetry consent (per subaccount — ask only if not already recorded):**
+
+> **STOP — do not run any bash here.** Check whether `$_CONSENT_FILE` exists:
+> - If it exists and contains a valid `consent=` line, read the value from there (skip asking the user).
+> - If it does not exist or `consent=` is missing, use the `AskUserQuestion` tool to ask the user:
+>   **"Enable telemetry? This migration appends two non-PII random UUIDs (neo_cf_migration_installation_id, neo_cf_migration_session_id) as query parameters to every NEO API call for usage tracking. No personal data, subaccount names, or credentials are included. Enable? (yes/no)"**
+>   Wait for the user's answer before continuing.
+
+```bash
+if [ ! -f "${_CONSENT_FILE}" ] || ! grep -q "^consent=" "${_CONSENT_FILE}"; then
+  _CONSENT="<yes or no from user answer above>"   # replace with actual value
+  echo "consent=${_CONSENT}" > "${_CONSENT_FILE}"
+fi
+_CONSENT=$(grep "^consent=" "${_CONSENT_FILE}" | cut -d= -f2)
+```
+
+**Collect SP signing key consent (per subaccount — ask only if not already recorded):**
+
+> **STOP — do not run any bash here.** Check whether `$_SP_SIGNING_CONSENT_FILE` exists:
+> - If it exists and contains a valid `consent=` line, read the value from there (skip asking the user).
+> - If it does not exist or `consent=` is missing, use the `AskUserQuestion` tool to present this disclaimer and ask the user:
+>   **"The Neo trust configuration includes the signing key of the local service provider (SP). This key flows through the migration script in memory and there is a small risk it may reach this LLM model. Do you want to proceed with the trust migration? (yes/no)"**
+>   If the user replies **no**, stop.
+>   Wait for the user's answer before continuing.
+
+```bash
+if [ ! -f "${_SP_SIGNING_CONSENT_FILE}" ] || ! grep -q "^consent=" "${_SP_SIGNING_CONSENT_FILE}"; then
+  _SP_SIGNING_CONSENT="<yes or no from user answer above>"   # replace with actual value
+  echo "consent=${_SP_SIGNING_CONSENT}" > "${_SP_SIGNING_CONSENT_FILE}"
+fi
+_SP_SIGNING_CONSENT=$(grep "^consent=" "${_SP_SIGNING_CONSENT_FILE}" | cut -d= -f2)
+[ "${_SP_SIGNING_CONSENT}" = "yes" ] || { echo "Trust migration cancelled by user." >&2; exit 0; }
+```
+
+**Ensure installation_id exists and reuse existing session_id (standalone — no new session):**
+
+```bash
+if [ "${_CONSENT}" = "yes" ]; then
+  if [ ! -f "${_TELEMETRY_FILE}" ] || ! grep -q "^neo_cf_migration_installation_id=" "${_TELEMETRY_FILE}"; then
+    _INSTALLATION_ID=$(python3 -c "import uuid; print(uuid.uuid4())")
+    echo "neo_cf_migration_installation_id=${_INSTALLATION_ID}" > "${_TELEMETRY_FILE}"
+  fi
+  if [ ! -f "${_SESSION_FILE}" ] || ! grep -q "^neo_cf_migration_session_id=" "${_SESSION_FILE}"; then
+    _MIGRATION_ID=$(python3 -c "import uuid; print(uuid.uuid4())")
+    echo "neo_cf_migration_session_id=${_MIGRATION_ID}" > "${_SESSION_FILE}"
+  fi
+fi
+```
+
+**Source the NEO API setup script:**
+
+```bash
+REGION_HOST="${NEO_REGION_HOST}" SUBACCOUNT="${NEO_SUBACCOUNT}" \
+  source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && cd ../../shared && pwd)/neo-api-setup-template.sh" || exit 1
+```
+
+**Guard — do not run the migration script without consent files:**
+
+```bash
+[ -f "${_CONSENT_FILE}" ] || {
+  echo "ERROR: Telemetry consent file not written. Cannot run trust migration." >&2
+  exit 1
+}
+[ -f "${_SP_SIGNING_CONSENT_FILE}" ] || {
+  echo "ERROR: SP signing key consent file not written. Cannot run trust migration." >&2
+  exit 1
+}
+```
+
 ## Migration
+
+> **Prerequisite:** Step 1b (sourcing `neo-api-setup-template.sh`) **must** run in the same shell session before this step. That source call is what sets the `NEO_TRUST_URL` variable — without it the script exits immediately with `ERROR: NEO_TRUST_URL environment variable is required`.
 
 Once the disclaimer is acknowledged and all inputs are collected, tell the user: "Running the trust migration script..." and then run:
 
@@ -135,8 +228,8 @@ Once the disclaimer is acknowledged and all inputs are collected, tell the user:
 TOKEN="${TOKEN}" \
   NEO_SUBACCOUNT="${NEO_SUBACCOUNT}" \
   NEO_REGION_HOST="${NEO_REGION_HOST}" \
+  NEO_TRUST_URL="${NEO_TRUST_URL}" \
   CF_SUBACCOUNT_ID="${CF_SUBACCOUNT_ID}" \
-  CONSENT_SP_SIGNING_KEY="true" \
   python3 assets/scripts/migrate_trust.py
 ```
 
@@ -154,8 +247,8 @@ Display the script's stdout output to the user verbatim. It contains:
 
 ## Common Issues
 
-### "ERROR: CONSENT_SP_SIGNING_KEY must be set to 'true'"
-**Cause:** The script was invoked without setting the consent env var. Re-run the disclaimer section and ensure the user has answered before invoking the script.
+### "ERROR: SP signing key consent file not found"
+**Cause:** The script was invoked without the SP signing key consent file. Re-run Step 1b and ensure the user has answered the SP signing key disclaimer.
 
 ### Token expired mid-run
 The Neo Bearer token is valid for 25 minutes. Ask the user for a fresh token and re-run. The script is idempotent — already-existing SAML trust returns HTTP 409 and is treated as success.

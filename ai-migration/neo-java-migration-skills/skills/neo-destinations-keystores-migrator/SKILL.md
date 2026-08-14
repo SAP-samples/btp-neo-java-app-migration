@@ -59,9 +59,9 @@ Immediately after Part A, present this and wait for the user to reply:
 > - **yes** — extract and upload credentials (I accept the risk)
 > - **no** — skip these destinations entirely (they will be listed in the summary for manual handling)
 
-**Do not show disclaimer 2 until the user has replied.** Based on the reply:
-- **yes** → `MIGRATE_OAUTH_CREDENTIALS=true`
-- **no** → `MIGRATE_OAUTH_CREDENTIALS=false`
+**Do not show disclaimer 2 until the user has replied.** Based on the reply, write to `$_OAUTH_CREDENTIALS_CONSENT_FILE`:
+- **yes** → `consent=yes`
+- **no** → `consent=no`
 
 ### 2. Keystores — explicit consent required
 
@@ -72,9 +72,9 @@ Present this disclaimer regardless of the answer to disclaimer 1:
 >
 > Do you want to migrate keystores? (yes/no)
 
-**Do not run the migration script until the user has replied.** Based on the reply:
-- **yes** → `MIGRATE_KEYSTORES=true`
-- **no** → `MIGRATE_KEYSTORES=false`
+**Do not run the migration script until the user has replied.** Based on the reply, write to `$_KEYSTORES_CONSENT_FILE`:
+- **yes** → `consent=yes`
+- **no** → `consent=no`
 
 ## Inputs Required
 
@@ -83,8 +83,8 @@ After both disclaimers are acknowledged, ask the user for the required inputs:
 | Input | Description | Example |
 |-------|-------------|---------|
 | `TOKEN` | Neo Platform API token (valid 25 min) | `eyJhbGci...` |
-| `HOST` | Neo landscape host | `hana.ondemand.com` |
-| `ACCOUNT` | Neo subaccount technical name | `wu44p26apd` |
+| `REGION_HOST` | Neo landscape host | `hana.ondemand.com` |
+| `SUBACCOUNT` | Neo subaccount technical name | `wu44p26apd` |
 
 ### How to obtain a Platform API token
 
@@ -159,19 +159,120 @@ Required scopes — **exactly and only these three**:
 >
 > If the token was issued for a client that has extra scopes (e.g. `hcp.manage*` or `hcp.write*`), you must **register a new, separate Platform API client** with exactly the three scopes above, generate a new token from that client, and use that token.
 
-### Verify CF target
+### Verify CF target and resolve CF_SUBACCOUNT_GUID
 
 Run `cf target` and show the output to the user. Confirm the correct org and space before continuing.
 
-## Collect Neo → CF app mapping
-
-After both disclaimers are acknowledged and all required inputs have been collected (TOKEN, HOST, ACCOUNT), fetch the Neo app list:
+Then resolve `CF_SUBACCOUNT_GUID` automatically — do NOT ask the user for it:
 
 ```bash
-curl -s "https://api.${HOST}/lifecycle/v1/accounts/${ACCOUNT}/apps" \
-  -H "Authorization: Bearer ${TOKEN}"
+_CF_ORG=$(cf target 2>/dev/null | awk '/^org:/{print $2}')
+CF_SUBACCOUNT_GUID=$(btp list accounts/subaccount 2>/dev/null | awk -v org="${_CF_ORG}" '
+  NR > 2 {
+    guid=$1; subdomain=$3
+    if (index(org, subdomain) > 0) { print guid; exit }
+  }
+')
+if [ -z "${CF_SUBACCOUNT_GUID}" ]; then
+  echo "ERROR: Could not resolve CF_SUBACCOUNT_GUID from org '${_CF_ORG}' — check btp login and cf target." >&2
+  exit 1
+fi
+echo "Resolved CF_SUBACCOUNT_GUID: ${CF_SUBACCOUNT_GUID}"
 ```
-Extract `entity.applicationName` from each item in the `apps` array. Follow `nextUrl` for pagination.
+
+## Collect Neo → CF app mapping
+
+After both disclaimers are acknowledged and all required inputs have been collected, collect telemetry consent and fetch the Neo app list via the migration script:
+
+**Collect consent and setup session (per Neo subaccount + CF subaccount pair):**
+
+> **STOP — do not run any bash here.** Check whether `~/.neo-migration-consents/$SUBACCOUNT/neo-telemetry-consent.txt` exists:
+> - If it exists and contains a valid `consent=` line, read the value from there and skip to the next step.
+> - If it does not exist or `consent=` is missing, use the `AskUserQuestion` tool to ask the user:
+>   **"Enable telemetry? This migration appends two non-PII random UUIDs (neo_cf_migration_installation_id, neo_cf_migration_session_id) as query parameters to every NEO API call for usage tracking. No personal data, subaccount names, or credentials are included. Enable? (yes/no)"**
+>   Wait for the user's answer before continuing.
+>
+> Similarly, check `~/.neo-migration-consents/$SUBACCOUNT/dest-oauth-credentials-consent.txt` and `~/.neo-migration-consents/$SUBACCOUNT/dest-keystores-consent.txt`. If either is missing, ask the user using the same disclaimers shown in the Security Disclaimers section above before writing the files.
+
+```bash
+_NEO_MIGRATION_HOME="${XDG_DATA_HOME:-${APPDATA:-$HOME}}/.neo-migration"
+_NEO_CONSENTS_HOME="${XDG_DATA_HOME:-${APPDATA:-$HOME}}/.neo-migration-consents"
+_SUBACCOUNT_DIR="${_NEO_MIGRATION_HOME}/${SUBACCOUNT}/${CF_SUBACCOUNT_GUID}"
+mkdir -p "${_NEO_MIGRATION_HOME}/${SUBACCOUNT}"
+mkdir -p "${_SUBACCOUNT_DIR}"
+mkdir -p "${_NEO_CONSENTS_HOME}/${SUBACCOUNT}/${CF_SUBACCOUNT_GUID}"
+_TELEMETRY_FILE="${_NEO_CONSENTS_HOME}/neo-telemetry-installation.txt"
+_CONSENT_FILE="${_NEO_CONSENTS_HOME}/${SUBACCOUNT}/neo-telemetry-consent.txt"
+_SESSION_FILE="${_NEO_CONSENTS_HOME}/${SUBACCOUNT}/${CF_SUBACCOUNT_GUID}/neo-telemetry-session.txt"
+_OAUTH_CREDENTIALS_CONSENT_FILE="${_NEO_CONSENTS_HOME}/${SUBACCOUNT}/dest-oauth-credentials-consent.txt"
+_KEYSTORES_CONSENT_FILE="${_NEO_CONSENTS_HOME}/${SUBACCOUNT}/dest-keystores-consent.txt"
+
+# Telemetry consent — per Neo subaccount
+if [ ! -f "${_CONSENT_FILE}" ] || ! grep -q "^consent=" "${_CONSENT_FILE}"; then
+  _CONSENT="<yes or no from user answer above>"   # replace with actual value
+  echo "consent=${_CONSENT}" > "${_CONSENT_FILE}"
+fi
+_CONSENT=$(grep "^consent=" "${_CONSENT_FILE}" | cut -d= -f2)
+
+# OAuth credentials consent — ask if not already recorded (standalone run)
+if [ ! -f "${_OAUTH_CREDENTIALS_CONSENT_FILE}" ] || ! grep -q "^consent=" "${_OAUTH_CREDENTIALS_CONSENT_FILE}"; then
+  _OAUTH_CREDENTIALS_CONSENT="<yes or no from user answer above>"   # replace with actual value
+  echo "consent=${_OAUTH_CREDENTIALS_CONSENT}" > "${_OAUTH_CREDENTIALS_CONSENT_FILE}"
+fi
+_OAUTH_CREDENTIALS_CONSENT=$(grep "^consent=" "${_OAUTH_CREDENTIALS_CONSENT_FILE}" | cut -d= -f2)
+
+# Keystores consent — ask if not already recorded (standalone run)
+if [ ! -f "${_KEYSTORES_CONSENT_FILE}" ] || ! grep -q "^consent=" "${_KEYSTORES_CONSENT_FILE}"; then
+  _KEYSTORES_CONSENT="<yes or no from user answer above>"   # replace with actual value
+  echo "consent=${_KEYSTORES_CONSENT}" > "${_KEYSTORES_CONSENT_FILE}"
+fi
+_KEYSTORES_CONSENT=$(grep "^consent=" "${_KEYSTORES_CONSENT_FILE}" | cut -d= -f2)
+
+if [ "${_CONSENT}" = "yes" ]; then
+  # installation_id — once per machine
+  if [ ! -f "${_TELEMETRY_FILE}" ] || ! grep -q "^neo_cf_migration_installation_id=" "${_TELEMETRY_FILE}"; then
+    _INSTALLATION_ID=$(python3 -c "import uuid; print(uuid.uuid4())")
+    echo "neo_cf_migration_installation_id=${_INSTALLATION_ID}" > "${_TELEMETRY_FILE}"
+  fi
+
+  # session_id — per Neo+CF pair; reuse if present (Phase 5 continues the session started in Phase 1)
+  if [ ! -f "${_SESSION_FILE}" ]; then
+    _MIGRATION_ID=$(python3 -c "import uuid; print(uuid.uuid4())")
+    echo "neo_cf_migration_session_id=${_MIGRATION_ID}" > "${_SESSION_FILE}"
+    echo "INFO: New migration session started. neo_cf_migration_session_id: ${_MIGRATION_ID}"
+  else
+    _MIGRATION_ID=$(grep "^neo_cf_migration_session_id=" "${_SESSION_FILE}" | cut -d= -f2)
+    echo "INFO: Resuming migration session. neo_cf_migration_session_id: ${_MIGRATION_ID}"
+  fi
+fi
+```
+
+**After collecting consent, source NEO API setup (exports `NEO_KEYSTORE_BASE`, `NEO_CONFIG_BASE`, `NEO_LIFECYCLE_URL`):**
+
+```bash
+_NEO_SETUP="$(cd "$(dirname "${BASH_SOURCE[0]}")" && cd ../../shared && pwd)/neo-api-setup-template.sh"
+[ -f "${_NEO_SETUP}" ] || _NEO_SETUP="ai-migration/neo-java-migration-skills/shared/neo-api-setup-template.sh"
+source "${_NEO_SETUP}" || exit 1
+```
+
+**Fetch Neo app list:**
+
+```bash
+[ -n "${NEO_KEYSTORE_BASE}" ] || {
+  echo "ERROR: NEO API env vars not set — collect telemetry consent and source neo-api-setup-template.sh before making any NEO API calls." >&2
+  exit 1
+}
+
+_SCRIPT="assets/scripts/migrate_destinations_and_keystores.py"
+[ -f "${_SCRIPT}" ] || { echo "ERROR: Migration script not found: ${_SCRIPT}" >&2; exit 1; }
+
+mkdir -p "${MIGRATION_DIR}"
+
+TOKEN="${TOKEN}" REGION_HOST="${REGION_HOST}" SUBACCOUNT="${SUBACCOUNT}" \
+  CF_SUBACCOUNT_GUID="${CF_SUBACCOUNT_GUID}" \
+  MIGRATION_DIR="${MIGRATION_DIR}" \
+  python3 "${_SCRIPT}" --list-apps
+```
 
 **Auto-match by name:** Compare the Neo app names against the CF app names (from `cf apps`). For any Neo app whose name exactly matches a CF app name, pre-fill that mapping and ask the user to confirm in a single question, e.g.:
 
@@ -199,11 +300,18 @@ Found N Neo apps. For each, which CF app should receive its destinations?
 Once all inputs are confirmed, tell the user: "Running the migration script..." and then run:
 
 ```bash
-TOKEN="${TOKEN}" HOST="${HOST}" ACCOUNT="${ACCOUNT}" \
+_SCRIPT="assets/scripts/migrate_destinations_and_keystores.py"
+[ -f "${_SCRIPT}" ] || { echo "ERROR: Migration script not found: ${_SCRIPT}" >&2; exit 1; }
+
+mkdir -p "${MIGRATION_DIR}"
+
+TOKEN="${TOKEN}" REGION_HOST="${REGION_HOST}" SUBACCOUNT="${SUBACCOUNT}" \
+  CF_SUBACCOUNT_GUID="${CF_SUBACCOUNT_GUID}" \
+  MIGRATION_DIR="${MIGRATION_DIR}" \
   APP_MAPPING='{"<neo-app1>": "<cf-app1>", "<neo-app2>": "<cf-app1>"}' \
-  MIGRATE_KEYSTORES="<true|false>" \
-  MIGRATE_OAUTH_CREDENTIALS="<true|false>" \
-  python3 assets/scripts/migrate_destinations_and_keystores.py
+  MIGRATE_KEYSTORES="${_KEYSTORES_CONSENT}" \
+  MIGRATE_OAUTH_CREDENTIALS="${_OAUTH_CREDENTIALS_CONSENT}" \
+  python3 "${_SCRIPT}"
 ```
 
 Do NOT show the full command to the user — only the short status message above.

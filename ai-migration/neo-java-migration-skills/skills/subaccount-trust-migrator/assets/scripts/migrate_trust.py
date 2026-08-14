@@ -9,8 +9,9 @@ Usage:
   TOKEN=<neo-platform-api-bearer-token>
   NEO_SUBACCOUNT=<neo-subaccount-technical-name>
   NEO_REGION_HOST=<region>.hana.ondemand.com
+  NEO_TRUST_URL=<url>              # set by neo-api-setup-template.sh; telemetry params appended by script if consent=yes
   CF_SUBACCOUNT_ID=<cf-subaccount-guid>
-  CONSENT_SP_SIGNING_KEY=true      # must be explicitly set after user acknowledges disclaimer
+  # SP signing key consent is checked via ~/.neo-migration-consents/$NEO_SUBACCOUNT/trust-sp-signing-consent.txt
 """
 import json, os, re, subprocess, sys
 
@@ -30,14 +31,62 @@ TOKEN = _require("TOKEN")
 NEO_SUBACCOUNT = _require("NEO_SUBACCOUNT")
 NEO_REGION_HOST = _require("NEO_REGION_HOST")
 CF_SUBACCOUNT_ID = _require("CF_SUBACCOUNT_ID")
+NEO_TRUST_URL = _require("NEO_TRUST_URL")
 
-CONSENT_SP_SIGNING_KEY = os.environ.get("CONSENT_SP_SIGNING_KEY", "").strip().lower()
-if CONSENT_SP_SIGNING_KEY != "true":
+# Verify telemetry consent was collected before any NEO API call
+_neo_migration_home = os.environ.get("XDG_DATA_HOME") or os.environ.get("APPDATA") or os.path.expanduser("~")
+_neo_consents_home = os.path.join(_neo_migration_home, ".neo-migration-consents")
+_neo_migration_home = os.path.join(_neo_migration_home, ".neo-migration")
+_consent_file = os.path.join(_neo_consents_home, NEO_SUBACCOUNT, "neo-telemetry-consent.txt")
+if not os.path.isfile(_consent_file):
     print(
-        "ERROR: CONSENT_SP_SIGNING_KEY must be set to 'true'.\n"
-        "This confirms the user has acknowledged that the Neo SP signing key\n"
-        "flows through the script in memory and accepted the risk.\n"
-        "Re-run the skill and answer the disclaimer before invoking the script.",
+        f"ERROR: Telemetry consent file not found: {_consent_file}\n"
+        "Run Step 1b (telemetry setup) before invoking the migration script.",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+def _read_file_value(path, key):
+    """Read a key=value line from a file, return value or empty string."""
+    try:
+        with open(path) as f:
+            for line in f:
+                if line.startswith(key + "="):
+                    return line.strip().split("=", 1)[1]
+    except OSError:
+        pass
+    return ""
+
+def _append_telemetry(url):
+    """Append telemetry query params to url if consent=yes."""
+    consent = _read_file_value(_consent_file, "consent")
+    if consent != "yes":
+        return url
+    cf_subaccount_id = os.environ.get("CF_SUBACCOUNT_ID", "").strip()
+    _telemetry_file = os.path.join(_neo_consents_home, "neo-telemetry-installation.txt")
+    _session_file = os.path.join(_neo_consents_home, NEO_SUBACCOUNT, cf_subaccount_id, "neo-telemetry-session.txt")
+    installation_id = _read_file_value(_telemetry_file, "neo_cf_migration_installation_id")
+    session_id = _read_file_value(_session_file, "neo_cf_migration_session_id")
+    if not installation_id or not session_id:
+        return url
+    sep = "&" if "?" in url else "?"
+    return f"{url}{sep}neo_cf_migration_installation_id={installation_id}&neo_cf_migration_session_id={session_id}"
+
+NEO_TRUST_URL = _append_telemetry(NEO_TRUST_URL)
+
+_sp_signing_consent_file = os.path.join(_neo_consents_home, NEO_SUBACCOUNT, "trust-sp-signing-consent.txt")
+_sp_signing_consent = ""
+try:
+    with open(_sp_signing_consent_file) as _f:
+        for _line in _f:
+            if _line.startswith("consent="):
+                _sp_signing_consent = _line.strip().split("=", 1)[1].lower()
+except OSError:
+    pass
+if _sp_signing_consent != "yes":
+    print(
+        f"ERROR: SP signing key consent file not found or consent not given: {_sp_signing_consent_file}\n"
+        "Run Step 1b and answer the SP signing key disclaimer before invoking the script.",
         file=sys.stderr,
     )
     sys.exit(1)
@@ -75,8 +124,7 @@ def _curl(*args):
 
 def neo_get_trust():
     """Fetch raw trust config JSON from Neo. Returns parsed dict."""
-    url = f"https://apissecurity.{NEO_REGION_HOST}/trust/v2/accounts/{NEO_SUBACCOUNT}"
-    body, status = _curl(url, "-H", f"Authorization: Bearer {TOKEN}", "-H", "Accept: application/json")
+    body, status = _curl(NEO_TRUST_URL, "-H", f"Authorization: Bearer {TOKEN}", "-H", "Accept: application/json")
     if status == "401":
         print("ERROR: Neo API returned 401 — token expired or invalid. Obtain a fresh token.", file=sys.stderr)
         sys.exit(1)
