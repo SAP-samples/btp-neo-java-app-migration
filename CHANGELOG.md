@@ -22,7 +22,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **OpenRewrite side-effect cleanup** for `pom.xml` after migration, ensuring the build stays correct post-transformation.
 - **Runtime dependency detection and troubleshooting** for `DESTINATION`-related runtime dependencies.
 - **Inline JSON/HTTP library detection** before dependency generation, so generated dependencies match what the app actually uses.
-- **Repository deletion via the SDM REST API** in the Document Management Service skill.
 - **Credential Store free-plan support** in the keystore/credential-store skill.
 - **Subagent usage guidance and skill improvements** across the migration skills.
 
