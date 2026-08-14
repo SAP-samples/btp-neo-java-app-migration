@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<web-app xmlns="http://xmlns.jcp.org/xml/ns/javaee"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://xmlns.jcp.org/xml/ns/javaee 
+         http://xmlns.jcp.org/xml/ns/javaee/web-app_3_1.xsd"
+         version="3.1">
+
+    <display-name>SAP BTP Neo Authentication and Authorization Demo</display-name>
+    <description>Demonstrates declarative authentication and authorization</description>
+
+    <!-- Welcome file list -->
+    <welcome-file-list>
+        <welcome-file>index.html</welcome-file>
+    </welcome-file-list>
+
+    <!-- Servlet Definitions -->
+    <servlet>
+        <servlet-name>WelcomeServlet</servlet-name>
+        <servlet-class>com.sap.demo.servlet.WelcomeServlet</servlet-class>
+    </servlet>
+    <servlet-mapping>
+        <servlet-name>WelcomeServlet</servlet-name>
+        <url-pattern>/welcome</url-pattern>
+    </servlet-mapping>
+
+    <servlet>
+        <servlet-name>UserServlet</servlet-name>
+        <servlet-class>com.sap.demo.servlet.UserServlet</servlet-class>
+    </servlet>
+    <servlet-mapping>
+        <servlet-name>UserServlet</servlet-name>
+        <url-pattern>/user/dashboard</url-pattern>
+    </servlet-mapping>
+
+    <servlet>
+        <servlet-name>AdminServlet</servlet-name>
+        <servlet-class>com.sap.demo.servlet.AdminServlet</servlet-class>
+    </servlet>
+    <servlet-mapping>
+        <servlet-name>AdminServlet</servlet-name>
+        <url-pattern>/admin/console</url-pattern>
+    </servlet-mapping>
+
+    <servlet>
+        <servlet-name>LogoutServlet</servlet-name>
+        <servlet-class>com.sap.demo.servlet.LogoutServlet</servlet-class>
+    </servlet>
+    <servlet-mapping>
+        <servlet-name>LogoutServlet</servlet-name>
+        <url-pattern>/logout</url-pattern>
+    </servlet-mapping>
+
+    <!-- REST API Servlets -->
+    <servlet>
+        <servlet-name>PublicApiServlet</servlet-name>
+        <servlet-class>com.sap.demo.api.PublicApiServlet</servlet-class>
+    </servlet>
+    <servlet-mapping>
+        <servlet-name>PublicApiServlet</servlet-name>
+        <url-pattern>/api/public/info</url-pattern>
+    </servlet-mapping>
+
+    <servlet>
+        <servlet-name>UserApiServlet</servlet-name>
+        <servlet-class>com.sap.demo.api.UserApiServlet</servlet-class>
+    </servlet>
+    <servlet-mapping>
+        <servlet-name>UserApiServlet</servlet-name>
+        <url-pattern>/api/user/data</url-pattern>
+    </servlet-mapping>
+
+    <servlet>
+        <servlet-name>AdminApiServlet</servlet-name>
+        <servlet-class>com.sap.demo.api.AdminApiServlet</servlet-class>
+    </servlet>
+    <servlet-mapping>
+        <servlet-name>AdminApiServlet</servlet-name>
+        <url-pattern>/api/admin/operations</url-pattern>
+    </servlet-mapping>
+
+    <!-- Security Constraints - Declarative Authorization -->
+    
+    <!-- Admin-only resources -->
+    <security-constraint>
+        <display-name>Admin Area</display-name>
+        <web-resource-collection>
+            <web-resource-name>Admin Pages</web-resource-name>
+            <url-pattern>/admin/*</url-pattern>
+        </web-resource-collection>
+        <web-resource-collection>
+            <web-resource-name>Admin API</web-resource-name>
+            <url-pattern>/api/admin/*</url-pattern>
+        </web-resource-collection>
+        <auth-constraint>
+            <role-name>Admin</role-name>
+        </auth-constraint>
+    </security-constraint>
+
+    <!-- User-accessible resources (both User and Admin roles) -->
+    <security-constraint>
+        <display-name>User Area</display-name>
+        <web-resource-collection>
+            <web-resource-name>User Pages</web-resource-name>
+            <url-pattern>/user/*</url-pattern>
+        </web-resource-collection>
+        <web-resource-collection>
+            <web-resource-name>User API</web-resource-name>
+            <url-pattern>/api/user/*</url-pattern>
+        </web-resource-collection>
+        <auth-constraint>
+            <role-name>User</role-name>
+            <role-name>Admin</role-name>
+        </auth-constraint>
+    </security-constraint>
+
+    <!-- Login Configuration - SSO with SAML (handled by SAP BTP Neo platform) -->
+    <!-- For Neo SSO, use FORM method which delegates to platform's SAML authentication -->
+    <login-config>
+        <auth-method>FORM</auth-method>
+    </login-config>
+
+    <!-- Security Roles -->
+    <security-role>
+        <description>Administrator role with full access</description>
+        <role-name>Admin</role-name>
+    </security-role>
+
+    <security-role>
+        <description>Regular user role with limited access</description>
+        <role-name>User</role-name>
+    </security-role>
+
+    <!-- Session Configuration -->
+    <session-config>
+        <session-timeout>30</session-timeout>
+    </session-config>
+
+</web-app>
