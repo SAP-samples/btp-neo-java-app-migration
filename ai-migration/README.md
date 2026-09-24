@@ -299,7 +299,7 @@ configured at subaccount level — see
 ├── plugin.json                 # Plugin manifest
 
 ai-migration/
-├── neo-java-migration-skills/
+└── neo-java-migration-skills/
     ├── skills/                 # All migration skills
     │   ├── approuter-setup/
     │   ├── authentication-xsuaa/
@@ -321,12 +321,11 @@ ai-migration/
     │   ├── subaccount-migration-orchestrator/
     │   ├── subaccount-roles-export/
     │   ├── subaccount-roles-import/
-    │   ├── subaccount-trust-export/
-    │   ├── subaccount-trust-import/
-    │   ├── tomee-runtime/
+    │   ├── subaccount-trust-migrator/
+    │   └── tomee-runtime/
     │
-    ├── marketplace/
-        ├── description.md
+    └── marketplace/
+        └── description.md
 ```
 
 ## Skill Discovery
@@ -499,7 +498,11 @@ Contributions welcome! When adding skills:
 
 ## Support
 
-- **Issues**: [GitHub Issues](https://github.com/SAP-samples/btp-neo-java-app-migration/issues)
+- **[Open an issue](https://github.com/SAP-samples/btp-neo-java-app-migration/issues)** — it's the best way to:
+    - 🐛 Report a bug or unexpected behavior
+    - 💡 Propose a new skill or workflow you need
+    - ❓ Ask a question about the content or usage
+    > **Missing a skill for your use case?** Don't hesitate to request it — new skills are prioritized based on community needs. Your issue might be exactly what others are waiting for too.
 - **SAP BTP Docs**: [Migration Guide](https://help.sap.com/docs/btp/sap-business-technology-platform/migrating-from-neo-environment-to-cloud-foundry-environment)
 
 ## License
