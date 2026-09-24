@@ -8,6 +8,31 @@ A collection of AI agent skills for migrating SAP BTP Neo Java applications and 
 
 ---
 
+## Table of Contents
+
+- [Setup for the most common AI tools](#setup-for-the-most-common-ai-tools)
+- [Quick Start](#quick-start)
+- [Migration Paths](#migration-paths)
+- [Skills Catalog](#skills-catalog)
+- [Plugin Structure](#plugin-structure)
+- [Skill Discovery](#skill-discovery)
+- [Dependency Management](#dependency-management)
+- [Progressive Disclosure](#progressive-disclosure)
+- [Prerequisites](#prerequisites)
+- [Examples](#examples)
+- [CF Services](#cf-services)
+- [Architecture](#architecture)
+- [Documentation](#documentation)
+- [Related Resources](#related-resources)
+- [Version History](#version-history)
+- [Contributing](#contributing)
+- [Support](#support)
+- [License](#license)
+- [Authors](#authors)
+- [Acknowledgments](#acknowledgments)
+
+---
+
 ## Setup for the most common AI tools
 
 ### Claude Code
@@ -131,6 +156,99 @@ Use the persistence-hana skill to configure HANA Cloud database
 Use the jakarta-java25-migration skill to upgrade to Java 25
 ```
 
+## Migration Paths
+
+Neo Java migration is a combination of several **dimensions**: the app's
+**runtime**, its **authentication** mechanism, its **persistence**, and its
+**connectivity** needs. The orchestrator detects these and chains the right
+skills. Not every combination is equally automated — the tables below show what
+is fully covered versus what needs manual follow-up.
+
+### Application flow
+
+```mermaid
+flowchart LR
+    subgraph NEO["① SAP BTP Neo — source"]
+        A["Neo Java app<br/>Java 8 / 11 · javax.*<br/>neo-java-web-api"]
+    end
+
+    subgraph SKILLS["② Migration skills"]
+        F1[jakarta-java25-migration]
+        F2[sdk-replacement]
+    end
+
+    subgraph CF["③ SAP BTP Cloud Foundry — target"]
+        R1[CF Tomcat<br/>Servlet / JAX-RS]
+        R2[CF TomEE<br/>EJB]
+        X[XSUAA + approuter]
+        O1[MTA descriptor<br/>+ bound services]
+        subgraph OPT["Optional services (additive)"]
+            S1[HANA Cloud]
+            S2[SDM]
+            S3[Destination / Connectivity]
+        end
+    end
+
+    A ==>|migrate| F1
+    F1 --> F2
+    F2 ==>|default| R1
+    F2 ==>|"@Stateless / @EJB"| R2
+    R1 --> X
+    R2 --> X
+    X --> O1
+    S1 -.-> O1
+    S2 -.-> O1
+    S3 -.-> O1
+```
+
+Read the diagram left to right: everything in ① lives on Neo, everything in ③
+lives on Cloud Foundry, and ② is what the plugin actually does to get from one to
+the other. The thick arrows mark the crossing of the Neo → CF boundary.
+
+Within ②, the runtime baseline and SDK steps are sequential stages that every app
+passes through — not alternatives. In ③, Tomcat and TomEE are mutually exclusive,
+while the optional services are additive. Identity providers are **not** shown
+here: IAS is the IdP that XSUAA trusts, not a replacement for it, and trust is
+configured at subaccount level — see
+[Supported subaccount migration paths](#supported-subaccount-migration-paths).
+
+### Supported application migration paths
+
+| Source | Target runtime | Auth | Persistence | Status |
+|--------|---------------|------|-------------|--------|
+| Neo Java (Servlet / JAX-RS) | CF Tomcat | XSUAA | HANA Cloud | ✅ Fully automated |
+| Neo Java (Servlet / JAX-RS) | CF Tomcat | XSUAA | none | ✅ Fully automated |
+| Neo Java EE 7 (EJB) | CF TomEE | XSUAA | HANA Cloud | ✅ Automated (TomEE runtime) |
+| Neo Java + on-premise backend | CF Tomcat | XSUAA | any | ⚠️ Code automated — Cloud Connector must be installed and configured separately |
+| Neo Java + ECM Documents | CF Tomcat | XSUAA | SDM | ✅ Automated (SDM / CMIS) |
+| Neo Java (FORM / SAML) | CF Tomcat | XSUAA (IAS as IdP) | any | ⚠️ Trust migration steps required |
+
+### Supported subaccount migration paths
+
+| Configuration | Source | Target | Status |
+|---------------|--------|--------|--------|
+| IdP / SAML trust | Neo subaccount | CF subaccount | ⚠️ IAS automated, third-party manual |
+| Roles, groups, assignments | Neo subaccount | CF role collections | ⚠️ Assigned after apps deployed |
+| Destinations & keystores (config data) | Neo subaccount / app | CF destination / credstore | ✅ Automated (post-deploy) |
+
+### How dimensions map to skills
+
+| Dimension | Detected from | Skill | Replaced with |
+|-----------|--------------|-------|---------------|
+| Runtime baseline | Java < 25, `javax.*` | `jakarta-java25-migration` | Java 25 + `jakarta.*` namespaces |
+| SDK | `neo-java-web-api`, `scp-neo`, `com.sap.cloud.*` / `com.sap.core.connectivity.*` imports | `sdk-replacement` | SAP Cloud SDK |
+| Auth | `<auth-method>FORM`, `security-constraint`, `UserProvider` | `authentication-xsuaa` | XSUAA + Application Router |
+| Approuter | UI content (`webapp/`) or auth in `web.xml` — not needed for API-only, no-auth backends | `approuter-setup` | Application Router (`xs-app.json`) |
+| Persistence | `javax.sql.DataSource` | `persistence-hana` | CF HANA schema binding |
+| Connectivity (destinations) | `ConnectivityConfiguration`, `DestinationConfiguration` (`web.xml` `<resource-ref>` or Java imports) | `destinations` | SAP Cloud SDK `DestinationAccessor` |
+| Connectivity (on-premise) | `HC_OP_HTTP_PROXY_*` environment variables, manual proxy config | `connectivity-onpremise` (requires `destinations`) | SAP Cloud SDK automatic connectivity + Cloud Connector |
+| EJB runtime | `@Stateless`, `@EJB` | `tomee-runtime` | CF TomEE |
+| Documents | `com.sap.ecm.api.EcmService` | `document-management-sdm` | SAP Document Management Service (OpenCMIS) |
+| Keystores & credentials | `KeyStoreService` / `PasswordStorage` (`web.xml` `<resource-ref>` or JNDI lookups) | `keystore-credstore` | SAP Credential Store REST API (mTLS) — ⚠️ requires a manually provisioned `credstore` instance before deploy |
+| Deployment descriptor | Always invoked last, after all other skills | `mta-descriptor` | `mtad.yaml` with matching service bindings |
+
+> **Legend:** ✅ fully automated by the skills · ⚠️ automated with required manual follow-up steps (documented in the relevant skill).
+
 ## Skills Catalog
 
 ### 🎭 Orchestrator
@@ -181,7 +299,7 @@ Use the jakarta-java25-migration skill to upgrade to Java 25
 ├── plugin.json                 # Plugin manifest
 
 ai-migration/
-├── neo-java-migration-skills/
+└── neo-java-migration-skills/
     ├── skills/                 # All migration skills
     │   ├── approuter-setup/
     │   ├── authentication-xsuaa/
@@ -203,12 +321,11 @@ ai-migration/
     │   ├── subaccount-migration-orchestrator/
     │   ├── subaccount-roles-export/
     │   ├── subaccount-roles-import/
-    │   ├── subaccount-trust-export/
-    │   ├── subaccount-trust-import/
-    │   ├── tomee-runtime/
+    │   ├── subaccount-trust-migrator/
+    │   └── tomee-runtime/
     │
-    ├── marketplace/
-        ├── description.md
+    └── marketplace/
+        └── description.md
 ```
 
 ## Skill Discovery
@@ -381,7 +498,11 @@ Contributions welcome! When adding skills:
 
 ## Support
 
-- **Issues**: [GitHub Issues](https://github.com/SAP-samples/btp-neo-java-app-migration/issues)
+- **[Open an issue](https://github.com/SAP-samples/btp-neo-java-app-migration/issues)** — it's the best way to:
+    - 🐛 Report a bug or unexpected behavior
+    - 💡 Propose a new skill or workflow you need
+    - ❓ Ask a question about the content or usage
+    > **Missing a skill for your use case?** Don't hesitate to request it — new skills are prioritized based on community needs. Your issue might be exactly what others are waiting for too.
 - **SAP BTP Docs**: [Migration Guide](https://help.sap.com/docs/btp/sap-business-technology-platform/migrating-from-neo-environment-to-cloud-foundry-environment)
 
 ## License
