@@ -11,61 +11,76 @@ Please visit the following links to check the migration process for the classic 
 1) [SAP Java Buildpack v1 sample](https://github.com/SAP-samples/btp-neo-java-app-migration/tree/migration-example-old)
 2) [SAP Java Buildpack v2 sample](https://github.com/SAP-samples/btp-neo-java-app-migration/tree/migration-example-new)
 
+> ### 🤖 Fast Track: AI-Assisted Migration Available (Recommended)
+> Migrate your SAP BTP Neo Java applications to Cloud Foundry automatically using our collection of **Agent Skills** compatible with **Claude Code**, **Cursor**, and **GitHub Copilot**.
+>
+> - 📖 **[AI Migration Guide & Setup](./ai-migration/README.md)**
+> - 🧩 **[Browse All 22 AI Migration Skills](./ai-migration/neo-java-migration-skills/skills/)**
+> - ⚡ **Quick prompt:** `Use the neo-to-cf-migration-orchestrator skill to analyze and migrate my Neo Java application`
+
 ## Table of Contents
-1. [Purpose](#1-purpose)
+- **[🚀 AI-Assisted Migration (Recommended)](#ai-assisted-migration-recommended)**
+  - [Overview & Supported AI Tools](#overview--supported-ai-tools)
+  - [AI Skills Folder & Catalog](#ai-skills-folder--catalog)
+  - [Quick Start](#quick-start)
+- **🛠️ Manual Step-by-Step Migration**
+  1. [Purpose](#1-purpose)
+  2. [Prerequisites](#2-prerequisites)
+     - 2.1 [Install the Migration Tools](#21-install-the-migration-tools)
+  3. [Gather All Application Sources](#3-gather-all-application-sources)
+     - 3.1 [Clone the Repo Containing the Source Code](#31-clone-the-repo-containing-the-source-code)
+     - 3.2 [Make Sure Your Code Compiles](#32-make-sure-your-code-compiles)
+     - 3.3 [Analyze the Dependencies of Your Java Application](#33-analyze-the-dependencies-of-your-java-applications)
+  4. [Migrate to Jakarta EE 10 and Java 25](#4-migrate-to-jakarta-ee-10-and-java-25)
+  5. [Replace the Neo Java Web API with the SAP Cloud SDK](#5-replace-the-neo-java-web-api-with-the-sap-cloud-sdk)
+  6. [Set Up Authentication and Authorization](#6-set-up-authentication-and-authorization)
+  7. [Additional Scenarios](#7-additional-scenarios)
+  8. [Deploy the Java Application](#8-deploy-the-java-application)
+     - 8.1 [Prepare the MTA Deployment Descriptor File](#81-prepare-the-mta-deployment-descriptor-file)
+     - 8.2 [Deploy the Java Application to the Cloud Foundry Environment](#82-deploy-the-java-application-to-the-cloud-foundry-environment)
+  9. [Access the Java Application](#9-access-the-java-application)
+  10. [AI Assisted Migration Reference](#10-ai-assisted-migration-reference)
 
-2. [Prerequisites](#2-prerequisites)
+---
 
-    2.1 [Install the Migration Tools](#21-install-the-migration-tools)
+## 🚀 AI-Assisted Migration (Recommended)
 
-3. [Gather All Application Sources](#3-gather-all-application-sources)
+Instead of performing code and descriptor refactoring manually, you can use our modular **Agent Skills** collection built on the [Agent Skills](https://agentskills.io) open standard.
 
-    3.1 [Clone the Repo Containing the Source Code](#31-clone-the-repo-containing-the-source-code)
+### Overview & Supported AI Tools
+The skills guide your AI agent through the full migration lifecycle — analyzing dependencies, upgrading Java & Jakarta EE, replacing `neo-java-web-api` with the SAP Cloud SDK, configuring XSUAA and MTA descriptors, and migrating subaccount configurations (destinations, keystores, roles, trust). Always review the generated changes, test thoroughly, and expect manual adjustments for complex authentication flows, custom configurations, or subaccount-level settings.
 
-    3.2 [Make Sure Your Code Compiles](#32-make-sure-your-code-compiles)
+Supported environments:
+- **Claude Code**: Full native support via plugin marketplace:
+  `claude plugin marketplace add https://github.com/SAP-samples/btp-neo-java-app-migration.git && claude plugin install sap-btp-neo-migration@sap-btp-neo-migration-tools`.
+- **Cursor**: Copy skills from `ai-migration/neo-java-migration-skills/skills/` into `.cursor/skills/`.
+- **GitHub Copilot**: Copy skills into `.github/skills/`.
 
-    3.3 [Analyze the Dependencies of Your Java Application](#33-analyze-the-dependencies-of-your-java-applications)
+> **⚠️ Data protection:** Before transmitting source code, configuration files, or personal data to any AI service, ensure your selected AI/LLM model and provider meets your organization's confidentiality, data protection (including GDPR), and regulatory requirements. See the full data-protection notice in the [AI Migration Guide](./ai-migration/README.md).
 
+### AI Skills Folder & Catalog
+All skills are located in the [**`ai-migration/neo-java-migration-skills/skills/`**](./ai-migration/neo-java-migration-skills/skills/) folder:
 
-4. [Migrate to Jakarta EE 10 and Java 25](#4-migrate-to-jakarta-ee-10-and-java-25)
-  
-5. [Replace the Neo Java Web API with the SAP Cloud SDK](#5-replace-the-neo-java-web-api-with-the-sap-cloud-sdk)
+| Category | Key Skills | Folder Link |
+| :--- | :--- | :--- |
+| **🎭 Orchestration** | Full end-to-end migration runner | [`neo-to-cf-migration-orchestrator`](./ai-migration/neo-java-migration-skills/skills/neo-to-cf-migration-orchestrator/SKILL.md) |
+| **🏗️ Foundation** | Java 25 / Jakarta EE 10, SAP Cloud SDK | [`jakarta-java25-migration`](./ai-migration/neo-java-migration-skills/skills/jakarta-java25-migration/SKILL.md), [`sdk-replacement`](./ai-migration/neo-java-migration-skills/skills/sdk-replacement/SKILL.md) |
+| **🔐 Security** | XSUAA, Credential Store | [`authentication-xsuaa`](./ai-migration/neo-java-migration-skills/skills/authentication-xsuaa/SKILL.md), [`keystore-credstore`](./ai-migration/neo-java-migration-skills/skills/keystore-credstore/SKILL.md) |
+| **🔌 Connectivity** | Destination Service, On-Premise via CC | [`destinations`](./ai-migration/neo-java-migration-skills/skills/destinations/SKILL.md), [`connectivity-onpremise`](./ai-migration/neo-java-migration-skills/skills/connectivity-onpremise/SKILL.md) |
+| **💾 Persistence & Storage** | HANA Cloud, SDM (CMIS) | [`persistence-hana`](./ai-migration/neo-java-migration-skills/skills/persistence-hana/SKILL.md), [`document-management-sdm`](./ai-migration/neo-java-migration-skills/skills/document-management-sdm/SKILL.md) |
+| **📦 Packaging & Deploy** | MTA Descriptor generation (`mtad.yaml`) | [`mta-descriptor`](./ai-migration/neo-java-migration-skills/skills/mta-descriptor/SKILL.md) |
+| **⚙️ Subaccount Config** | Destinations, Keystores, Trust, Roles | [`neo-destinations-keystores-migrator`](./ai-migration/neo-java-migration-skills/skills/neo-destinations-keystores-migrator/SKILL.md), [`subaccount-migration-orchestrator`](./ai-migration/neo-java-migration-skills/skills/subaccount-migration-orchestrator/SKILL.md) |
 
-6. [Set Up Authentication and Authorization](#6-set-up-authentication-and-authorization)
+### Quick Start
+To run a guided end-to-end migration, open your AI tool in your Neo project and enter the following prompt:
 
-7. [Additional Scenarios](#7-additional-scenarios)
+```text
+Use the neo-to-cf-migration-orchestrator skill to analyze and migrate my Neo Java application
+```
 
-   - [Destinations](scenarios/destinations)
+👉 **For detailed instructions and tool-specific setup, see the [AI-Assisted Migration Guide](./ai-migration/README.md).**
 
-   - [Connectivity](scenarios/connectivity)
-   
-   - [Mail Session](scenarios/mail)
-
-   - [Persistence](scenarios/persistence)
-
-   - [Document Management Service](scenarios/document-management)
-
-   - [Keystore Service](scenarios/keystore)
-   
-      - [Keystore API](scenarios/keystore/keystore-api)
-     
-      - [Storing Passwords](scenarios/keystore/storing-passwords)
-
-   - [Custom Domain Setup](scenarios/custom-domain)
-
-   - [Monitoring Applications](scenarios/monitoring)
-   
-   - [TomEE Runtime](scenarios/tomee)
-
-8. [Deploy the Java Application](#8-deploy-the-java-аpplication)
-
-    8.1 [Prepare the MTA Deployment Descriptor File](#81-prepare-the-mta-deployment-descriptor-file)
-
-    8.2 [Deploy the Java Application to the Cloud Foundry Environment](#82-deploy-the-java-application-to-the-cloud-foundry-environment)
-
-9. [Access the Java Application](#9-access-the-java-application)
-
-10. [AI Assisted Migration](#10-ai-assisted-migration)
+---
 
 ## 1. Purpose
 
@@ -125,15 +140,20 @@ mvn dependency:list
 ```
 If any necessary dependencies or sources are missing, search for additional repositories using the GitHub API or by manually searching within any approved corporate or public GitHub repositories. These repositories can serve as parent repositories or dependencies. Once you find the target repository, clone it, and analyze its dependencies.<br>
 
-> Note: Ensure that the versions of the source components match the required dependency versions. If the versions do not match, locate the correct version in the repository's history and clone it. You may need to checkout a specific commit, which contains the required version.<br>
+> Note: Ensure that the versions of the source components match the required dependency versions. If the versions do not match, locate the correct version in the repository's history and clone it. You may need to check out a specific commit that contains the required version.<br>
 
 > Note: Please have in mind that you may also need to clone some other dependencies. These are usually dependencies whose `groupId` starts with the same top-level domain and first subdomain as the project's `groupId`. For example, if the project's `groupId` starts with `org.example`, you may also need to clone all dependencies that start with `org.example`.
 
 ## 4. Migrate to Jakarta EE 10 and Java 25
 
+> 💡 **Automate with AI:** Use the [`jakarta-java25-migration`](./ai-migration/neo-java-migration-skills/skills/jakarta-java25-migration/SKILL.md) skill to automatically update your build configuration, Java 25 bytecode compatibility, and `javax.*` to `jakarta.*` package namespace migration.
+
 You can migrate your Java application to Java 25 to improve its performance, security, and maintainability. OpenRewrite recipes are used to perform the migration. For more information, see [Migration to Jakarta EE 10 and Java 25](scenarios/jakarta10-and-java25-migration).
 
 ## 5. Replace the Neo Java Web API with the SAP Cloud SDK
+
+> 💡 **Automate with AI:** Use the [`sdk-replacement`](./ai-migration/neo-java-migration-skills/skills/sdk-replacement/SKILL.md) skill to replace `neo-java-web-api` and configure Cloud Foundry BOMs automatically.
+
 The Neo Java Web API dependency is not provided in Cloud Foundry, so it must be replaced by SAP Cloud SDK dependencies.<br>
 
 ### 5.1 **Remove** the following dependency from the `pom.xml` file: <br>
@@ -218,6 +238,8 @@ The Neo Java Web API dependency is not provided in Cloud Foundry, so it must be 
 
 ## 6. Set Up Authentication and Authorization
 
+> 💡 **Automate with AI:** Use the [`authentication-xsuaa`](./ai-migration/neo-java-migration-skills/skills/authentication-xsuaa/SKILL.md) and [`approuter-setup`](./ai-migration/neo-java-migration-skills/skills/approuter-setup/SKILL.md) skills to configure XSUAA descriptors (`xs-security.json`), Application Router, and security constraints.
+
 For more information, see [Authentication and Authorization](scenarios/authentication-and-authorization).
 
 ### Related Information
@@ -229,26 +251,26 @@ For more information, see [Authentication and Authorization](scenarios/authentic
 
 This section contains a list of additional scenarios that depending on your business case may or may not be relevant to the migration process of your Java application. Each scenario contains guidelines and examples for refactoring your application.
 
-- [Destinations](scenarios/destinations)
+- [Destinations](scenarios/destinations) *(AI Skill: [`destinations`](./ai-migration/neo-java-migration-skills/skills/destinations/SKILL.md))*
 
   You can use destinations to define connections for outbound communication from your Java application to remote systems.
 
-- [Connectivity](scenarios/connectivity)
+- [Connectivity](scenarios/connectivity) *(AI Skill: [`connectivity-onpremise`](./ai-migration/neo-java-migration-skills/skills/connectivity-onpremise/SKILL.md))*
 
   In the Cloud Foundry environment, you can use the SAP Cloud SDK to establish a connection between an on-premise system and Cloud Connector. The SAP Cloud SDK provides an API to consume destinations created in the SAP BTP cockpit.
 
-- [Mail Session](scenarios/mail)
+- [Mail Session](scenarios/mail) *(AI Skill: [`mail-destinations`](./ai-migration/neo-java-migration-skills/skills/mail-destinations/SKILL.md))*
 
   You can create Internet or on-premise mail sessions to a mail server.
 
-- [Persistence](scenarios/persistence)
+- [Persistence](scenarios/persistence) *(AI Skill: [`persistence-hana`](./ai-migration/neo-java-migration-skills/skills/persistence-hana/SKILL.md))*
 
   You can configure your Java application to use a database connection so that the application can persist its data. 
 
-- [Document Management Service](scenarios/document-management)
+- [Document Management Service](scenarios/document-management) *(AI Skill: [`document-management-sdm`](./ai-migration/neo-java-migration-skills/skills/document-management-sdm/SKILL.md))*
 
   You can use the Document Management service to manage the complete lifecycle of documents, from storage and retrieval to version control and secure sharing.
-- [Keystore Service](scenarios/keystore)
+- [Keystore Service](scenarios/keystore) *(AI Skill: [`keystore-credstore`](./ai-migration/neo-java-migration-skills/skills/keystore-credstore/SKILL.md))*
 
   The Keystore service provides a repository for cryptographic keys and certificates to the applications in the Neo environment of SAP BTP.
 
@@ -264,17 +286,19 @@ This section contains a list of additional scenarios that depending on your busi
 
   You can use the SAP Custom Domain service to configure a custom domain for your Java application.
 
-- [Monitoring Applications](scenarios/monitoring)
+- [Monitoring Applications](scenarios/monitoring) *(AI Skill: [`monitoring-logging`](./ai-migration/neo-java-migration-skills/skills/monitoring-logging/SKILL.md))*
 
   You can use the SAP Cloud Logging service to monitor the performance of your Java application.
 
-- [TomEE Runtime](scenarios/tomee)
+- [TomEE Runtime](scenarios/tomee) *(AI Skill: [`tomee-runtime`](./ai-migration/neo-java-migration-skills/skills/tomee-runtime/SKILL.md))*
 
   You can use the TomEE 10 container to run your JavaEE application in the Cloud Foundry environment.
 
 
-## 8. Deploy the Java Аpplication
+## 8. Deploy the Java Application
 ### 8.1 Prepare the MTA Deployment Descriptor File
+
+> 💡 **Automate with AI:** Use the [`mta-descriptor`](./ai-migration/neo-java-migration-skills/skills/mta-descriptor/SKILL.md) skill to automatically generate `mtad.yaml` with all required service bindings, module configuration, and routing.
 
 The `mtad.yaml` file is the deployment descriptor for multitarget applications (MTA). It is a YAML file that describes the structure of the MTA, including the modules, resources, and dependencies. The `mtad.yaml` file is used by the Cloud Foundry CLI to deploy the MTA to the Cloud Foundry environment.
 
@@ -319,7 +343,7 @@ You can find an example of an MTA deployment descriptor in [MTA Deployment Descr
 
 - MTA Deployment Descriptor Example
 
-  Here you can see a sample `mtad.yaml` file that outlines the necessary configurations for deploying a Java application along with an approuter module. It includes the declaration of service instances for authentication, destinations, connectivity, SAP HANA database, and Document Management service, as well as the required properties and parameters for each module.
+  Here is a sample mtad.yaml file that outlines the necessary configurations for deploying a Java application along with an approuter module. It includes the declaration of service instances for authentication, destinations, connectivity, SAP HANA database, and Document Management service. Each module also includes the required properties and parameters.
 
   ```yaml
   _schema-version: "3.2"
@@ -425,5 +449,8 @@ You can deploy the application by executing the following commands:
 You can access the application in a browser using the application URL. You can find the application URL on the **Overview** page of your application in the SAP BTP cockpit.
 The format of the application URL is `https://<app-name>.cfapps.<cf-app-domain>`.
 
-## 10. AI Assisted Migration
-You can perform an AI assisted migration using the [AI Assisted Migration](./ai-migration/README.md) guide.
+## 10. AI Assisted Migration Reference
+For detailed instructions, tool-specific setups (Claude Code, Cursor, GitHub Copilot), orchestration architecture, and the complete catalog of skills, see:
+- 📖 **[AI-Assisted Migration Guide](./ai-migration/README.md)**
+- 🧩 **[AI Skills Directory (`ai-migration/neo-java-migration-skills/skills/`)](./ai-migration/neo-java-migration-skills/skills/)**
+- 🎭 **[Neo to CF Migration Orchestrator](./ai-migration/neo-java-migration-skills/skills/neo-to-cf-migration-orchestrator/SKILL.md)**
