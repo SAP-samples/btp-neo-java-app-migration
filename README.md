@@ -251,6 +251,8 @@ For more information, see [Authentication and Authorization](scenarios/authentic
 
 This section contains a list of additional scenarios that depending on your business case may or may not be relevant to the migration process of your Java application. Each scenario contains guidelines and examples for refactoring your application.
 
+> **⚠️ Security notice:** The example applications in the scenarios are intentionally minimal and demonstrate only one migration scenario each. Unless authentication is the topic of the scenario, they do **not** implement authentication or authorization, and their endpoints are reachable by anyone who knows the application URL. Use them only for learning and testing in non-productive subaccounts, do not bind them to productive data or backends, and undeploy them when you are done. Before you use any of this code in your own application, secure it as described in [Set Up Authentication and Authorization](#6-set-up-authentication-and-authorization).
+
 - [Destinations](scenarios/destinations) *(AI Skill: [`destinations`](./ai-migration/neo-java-migration-skills/skills/destinations/SKILL.md))*
 
   You can use destinations to define connections for outbound communication from your Java application to remote systems.
