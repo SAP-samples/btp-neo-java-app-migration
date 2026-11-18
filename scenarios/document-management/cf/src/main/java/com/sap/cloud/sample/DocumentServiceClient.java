@@ -40,7 +40,6 @@ public final class DocumentServiceClient {
     private static final String LANGUAGE_EN = "en";
     private static final String CONNECTION_TIMEOUT = Integer.toString(30_000);
     private static final String READ_TIMEOUT = Integer.toString(600_000);
-    public static final String SECRET_KEY = "Espm@1234567890";
 
     // Repository info properties
     private static final String REPOSITORIES_ENDPOINT = "rest/v2/repositories/";
