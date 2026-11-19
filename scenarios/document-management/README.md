@@ -429,6 +429,7 @@ The example bellow shows how you can retrieve a repository id:
 ## Example
 
 - [Example for the Neo environment](./neo) (before the refactoring)
+    - The repository key that protects the sample's repositories is read from the `ECM_REPOSITORY_KEY` environment variable. Set it when deploying, for example `neo deploy ... --ev ECM_REPOSITORY_KEY=<key>`. Use a strong, unique value and never commit it to source control.
 - [Example for the Cloud Foundry environment](./cf) (after the refactoring)
 
 ## Related Information

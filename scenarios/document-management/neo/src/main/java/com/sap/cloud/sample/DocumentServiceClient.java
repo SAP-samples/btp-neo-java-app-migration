@@ -13,8 +13,10 @@ import javax.naming.NamingException;
 
 public final class DocumentServiceClient {
 
-    public static final String SECRET_KEY = "Espm@1234567890";
+    // Set at deploy time, e.g. neo deploy ... --ev ECM_REPOSITORY_KEY=<key>
+    private static final String REPOSITORY_KEY_ENV = "ECM_REPOSITORY_KEY";
     private final EcmService ecmService;
+    private final String repositoryKey;
 
     public DocumentServiceClient() throws ServiceException {
         try {
@@ -24,11 +26,16 @@ public final class DocumentServiceClient {
         } catch (NamingException| ExceptionInInitializerError namingException) {
             throw new ServiceException(namingException.getMessage());
         }
+        this.repositoryKey = System.getenv(REPOSITORY_KEY_ENV);
+        if (this.repositoryKey == null || this.repositoryKey.isEmpty()) {
+            throw new ServiceException("Repository key is not configured. Set the " + REPOSITORY_KEY_ENV
+                    + " environment variable.");
+        }
     }
 
     public Session getSession(String uniqueName) throws ServiceException, CmisObjectNotFoundException {
         try {
-            return ecmService.connect(uniqueName, SECRET_KEY);
+            return ecmService.connect(uniqueName, repositoryKey);
         } catch (ServiceException serviceException) {
             throw new ServiceException(serviceException.getMessage());
         }
@@ -37,7 +44,7 @@ public final class DocumentServiceClient {
     public String createRepository(String uniqueName) {
         RepositoryOptions options = new RepositoryOptions();
         options.setUniqueName(uniqueName);
-        options.setRepositoryKey(SECRET_KEY);
+        options.setRepositoryKey(repositoryKey);
         options.setVisibility(Visibility.PROTECTED);
         return ecmService.createRepository(options);
     }

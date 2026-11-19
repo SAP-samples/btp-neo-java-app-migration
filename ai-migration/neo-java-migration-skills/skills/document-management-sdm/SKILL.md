@@ -171,15 +171,17 @@ public void handleDocument() {
     // Create repository
     RepositoryOptions options = new RepositoryOptions();
     options.setUniqueName("my-repo");
-    options.setRepositoryKey("secret-key");
+    options.setRepositoryKey(System.getenv("ECM_REPOSITORY_KEY"));
     String repoId = ecmService.createRepository(options);
 
     // Get CMIS session
-    Session session = ecmService.connect(repoId, "secret-key");
+    Session session = ecmService.connect(repoId, System.getenv("ECM_REPOSITORY_KEY"));
 
     // Work with documents...
 }
 ```
+
+> **Repository key:** SAP Document Management Service has no repository key. Access is controlled by the OAuth2 credentials of the `sdm` service binding. Drop the key from `RepositoryOptions.setRepositoryKey(...)` and `ecmService.connect(name, key)` when you migrate. Delete any constant or property that only held the key; do **not** carry it over into the migrated code. If the Neo source hardcoded the key as a literal, flag it to the user: the key is exposed in source history and should be considered compromised.
 
 **After (Cloud Foundry):**
 
